@@ -736,6 +736,89 @@ class FFmpegService {
 `.trim(),
   },
   {
+    path: 'lib/services/video_exporter.dart',
+    filename: 'video_exporter.dart',
+    description: 'دالة ومتحكم تصدير دمج الصورة والصوت إلى فيديو MP4 متوافق تلقائياً باستخدام FFmpeg Kit ومتابعة النسبة المئوية',
+    code: `import 'dart:io';
+import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter/return_code.dart';
+import 'package:path_provider/path_provider.dart';
+
+class VideoExporter {
+  /// دالة دمج الصورة والصوت لإنتاج فيديو متوافق الطول تلقائياً
+  Future<String?> exportImageAndAudioToVideo({
+    required String imagePath,
+    required String audioPath,
+    required Function(double) onProgress, // لمتابعة النسبة المئوية للتصدير
+    double? totalAudioDurationSeconds, // مدة الصوت الإجمالية بالثواني لحساب النسبة المئوية (اختياري)
+  }) async {
+    try {
+      // 1. تحديد مسار حفظ الفيديو النهائي بصيغة mp4 في جهاز المستخدم
+      final Directory extDir = await getTemporaryDirectory();
+      final String outputPath = '\${extDir.path}/الشيخ_العيد_\${DateTime.now().millisecondsSinceEpoch}.mp4';
+
+      // حذف أي ملف قديم بنفس الاسم لمنع الأخطاء
+      final file = File(outputPath);
+      if (await file.exists()) {
+        await file.delete();
+      }
+
+      // 2. أمر FFmpeg السحري لحل المشاكل:
+      // - loop 1: يكرر الصورة الثابتة بلا نهاية لتصبح فيديو.
+      // - i imagePath: مسار الصورة المدخلة.
+      // - i audioPath: مسار الصوت المدخل.
+      // - c:v libx264: مشفر الفيديو القياسي ليعمل كفيديو وليس كصورة.
+      // - tune stillimage: يحسن جودة الفيديو الذي أصله صورة ثابتة.
+      // - c:a aac: مشفر الصوت لضمان دمجه وسماعه.
+      // - b:a 192k: جودة صوت عالية للدرس.
+      // - pix_fmt yuv420p: صيغة الألوان القياسية ليعمل الفيديو على كل الهواتف ولا يظهر كصورة أو شاشة سوداء.
+      // - shortest: أهم أمر! ينهي الفيديو فوراً عند انتهاء الصوت، مهما كان الصوت طويلاً (ساعة أو أكثر).
+      final String ffmpegCommand = 
+          '-loop 1 -i "\$imagePath" -i "\$audioPath" -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest "\$outputPath"';
+
+      print("بدء عملية التصدير بالأمر: \$ffmpegCommand");
+
+      // 3. تشغيل العملية ومتابعة التقدم (لحل مشكلة الفيديوهات الطويلة)
+      final session = await FFmpegKit.executeAsync(
+        ffmpegCommand,
+        (session) async {
+          final returnCode = await session.getReturnCode();
+          if (ReturnCode.isSuccess(returnCode)) {
+            print("تم التصدير بنجاح! مسار الفيديو: \$outputPath");
+            onProgress(1.0); // 100%
+          } else {
+            print("فشل التصدير. كود الخطأ: \$returnCode");
+          }
+        },
+        (log) {
+          // لطباعة مجريات المعالجة في أندرويد ستوديو
+          print(log.getMessage());
+        },
+        (statistics) {
+          // حساب نسبة التقدم للفيديوهات الطويلة
+          final processedMs = statistics.getTime();
+          if (processedMs > 0) {
+            print("الوقت المعالج حالياً: \$processedMs مللي ثانية");
+            if (totalAudioDurationSeconds != null && totalAudioDurationSeconds > 0) {
+              final progressRatio = (processedMs / 1000.0) / totalAudioDurationSeconds;
+              onProgress(progressRatio.clamp(0.0, 0.99));
+            } else {
+              onProgress(processedMs / 1000.0);
+            }
+          }
+        }
+      );
+
+      return outputPath;
+    } catch (e) {
+      print("حدث خطأ غير متوقع أثناء التصدير: \$e");
+      return null;
+    }
+  }
+}
+`.trim(),
+  },
+  {
     path: 'lib/features/drafts/models/project_draft.dart',
     filename: 'project_draft.dart',
     description: 'نموذج بيانات المسودة متوافق مع Hive للتخزين المحلي',
