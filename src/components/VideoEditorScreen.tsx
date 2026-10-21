@@ -17,7 +17,7 @@ import {
   Square,
   PenTool
 } from 'lucide-react';
-import { ProjectDraft, TextOverlay, SpiritualEffect, AudioTrackConfig, AspectRatioType, ParticleOverlayItem } from '../types';
+import { ProjectDraft, TextOverlay, SpiritualEffect, AudioTrackConfig, AspectRatioType, ParticleOverlayItem, MediaClip } from '../types';
 import { PreviewPlayer } from './editor/PreviewPlayer';
 import { Timeline } from './editor/Timeline';
 import { BottomToolbar } from './editor/BottomToolbar';
@@ -123,16 +123,115 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
     StorageService.saveProject(updated);
   };
 
-  // Split clip at current playhead position
+  // 1. Split clip at current playhead cursor position
   const handleSplitAtPlayhead = () => {
-    const clips = draft.mediaClips || [];
-    const targetClip = clips.find((c) => currentTime > c.startTime && currentTime < c.endTime);
-    if (!targetClip) return;
+    const isImage = (draft.videoSourceUrl?.toLowerCase().endsWith('.jpg') || 
+                     draft.videoSourceUrl?.toLowerCase().endsWith('.png') || 
+                     draft.videoSourceUrl?.toLowerCase().endsWith('.jpeg') ||
+                     draft.videoSourceUrl?.toLowerCase().endsWith('.webp'));
+    
+    const clips: MediaClip[] = (draft.mediaClips && draft.mediaClips.length > 0)
+      ? [...draft.mediaClips]
+      : [
+          {
+            id: `clip_base_${Date.now()}`,
+            type: isImage ? 'image' : 'video',
+            name: draft.videoSourceName || 'المقطع الأساسي',
+            url: draft.videoSourceUrl,
+            duration: duration,
+            startTime: 0,
+            endTime: duration,
+            trimStart: draft.trimStart || 0,
+            trimEnd: draft.trimEnd || duration,
+            volume: 1,
+            opacity: 1,
+            scale: 1,
+          }
+        ];
 
-    const part1 = { ...targetClip, id: `${targetClip.id}_p1`, endTime: currentTime };
-    const part2 = { ...targetClip, id: `${targetClip.id}_p2`, startTime: currentTime };
-    const updatedClips = clips.filter((c) => c.id !== targetClip.id).concat([part1, part2]);
-    const updated = { ...draft, mediaClips: updatedClips };
+    const targetClipIndex = clips.findIndex((c) => currentTime > c.startTime && currentTime < c.endTime);
+    if (targetClipIndex === -1) {
+      return;
+    }
+
+    const targetClip = clips[targetClipIndex];
+    const splitOffset = +(currentTime - targetClip.startTime).toFixed(2);
+
+    const part1: MediaClip = {
+      ...targetClip,
+      id: `${targetClip.id}_p1_${Date.now()}`,
+      name: `${targetClip.name.replace(/ \(جزء \d+\)/, '')} (جزء 1)`,
+      endTime: +currentTime.toFixed(2),
+      trimEnd: +((targetClip.trimStart || 0) + splitOffset).toFixed(2),
+    };
+
+    const part2: MediaClip = {
+      ...targetClip,
+      id: `${targetClip.id}_p2_${Date.now()}`,
+      name: `${targetClip.name.replace(/ \(جزء \d+\)/, '')} (جزء 2)`,
+      startTime: +currentTime.toFixed(2),
+      trimStart: +((targetClip.trimStart || 0) + splitOffset).toFixed(2),
+    };
+
+    clips.splice(targetClipIndex, 1, part1, part2);
+    const updated = { ...draft, mediaClips: clips };
+    setDraft(updated);
+    onUpdateDraft(updated);
+    StorageService.saveProject(updated);
+  };
+
+  // 2. Trim video before current playhead cursor
+  const handleTrimBeforePlayhead = () => {
+    if (currentTime <= 0.2 || currentTime >= duration) return;
+    const cutAmount = +currentTime.toFixed(2);
+    const newDuration = Math.max(1, +(duration - cutAmount).toFixed(2));
+
+    const updated: ProjectDraft = {
+      ...draft,
+      duration: newDuration,
+      trimStart: +((draft.trimStart || 0) + cutAmount).toFixed(2),
+    };
+
+    if (draft.mediaClips && draft.mediaClips.length > 0) {
+      const remainingClips = draft.mediaClips
+        .filter((c) => c.endTime > cutAmount)
+        .map((c) => ({
+          ...c,
+          startTime: Math.max(0, +(c.startTime - cutAmount).toFixed(2)),
+          endTime: Math.max(0.2, +(c.endTime - cutAmount).toFixed(2)),
+          trimStart: c.startTime < cutAmount ? +((c.trimStart || 0) + (cutAmount - c.startTime)).toFixed(2) : c.trimStart,
+        }));
+      updated.mediaClips = remainingClips;
+    }
+
+    setDraft(updated);
+    onUpdateDraft(updated);
+    StorageService.saveProject(updated);
+    setCurrentTime(0);
+  };
+
+  // 3. Trim video after current playhead cursor
+  const handleTrimAfterPlayhead = () => {
+    if (currentTime <= 0.5 || currentTime >= duration) return;
+    const newDuration = Math.max(1, +currentTime.toFixed(2));
+
+    const updated: ProjectDraft = {
+      ...draft,
+      duration: newDuration,
+      trimEnd: +((draft.trimStart || 0) + newDuration).toFixed(2),
+    };
+
+    if (draft.mediaClips && draft.mediaClips.length > 0) {
+      const remainingClips = draft.mediaClips
+        .filter((c) => c.startTime < newDuration)
+        .map((c) => ({
+          ...c,
+          endTime: Math.min(newDuration, c.endTime),
+          trimEnd: c.endTime > newDuration ? +((c.trimStart || 0) + (newDuration - c.startTime)).toFixed(2) : c.trimEnd,
+        }));
+      updated.mediaClips = remainingClips;
+    }
+
     setDraft(updated);
     onUpdateDraft(updated);
     StorageService.saveProject(updated);
@@ -295,6 +394,9 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
         onPlayToggle={handlePlayToggle}
         onSeek={handleSeek}
         onToggleMute={handleToggleMute}
+        onSplitAtPlayhead={handleSplitAtPlayhead}
+        onTrimBeforePlayhead={handleTrimBeforePlayhead}
+        onTrimAfterPlayhead={handleTrimAfterPlayhead}
       />
 
       {/* Direct Editing Tabs & Previous Menus (النصوص، الصوت، مؤثرات يوتيوب، خط الريشة، المقاس) */}
@@ -322,6 +424,8 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
         onOpenTrimModal={() => setIsTrimModalOpen(true)}
         onDeleteClip={handleDeleteClip}
         onSplitAtPlayhead={handleSplitAtPlayhead}
+        onTrimBeforePlayhead={handleTrimBeforePlayhead}
+        onTrimAfterPlayhead={handleTrimAfterPlayhead}
       />
 
       {/* Bottom Action Toolbar */}

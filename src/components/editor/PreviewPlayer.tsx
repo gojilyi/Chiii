@@ -4,7 +4,7 @@
  */
 
 import React, { useRef, useEffect } from 'react';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize2, Sparkles } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize2, Sparkles, Scissors } from 'lucide-react';
 import { ProjectDraft } from '../../types';
 
 interface PreviewPlayerProps {
@@ -14,6 +14,9 @@ interface PreviewPlayerProps {
   onPlayToggle: () => void;
   onSeek: (time: number) => void;
   onToggleMute: () => void;
+  onSplitAtPlayhead?: () => void;
+  onTrimBeforePlayhead?: () => void;
+  onTrimAfterPlayhead?: () => void;
 }
 
 export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
@@ -23,6 +26,9 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
   onPlayToggle,
   onSeek,
   onToggleMute,
+  onSplitAtPlayhead,
+  onTrimBeforePlayhead,
+  onTrimAfterPlayhead,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageElementRef = useRef<HTMLImageElement>(null);
@@ -625,6 +631,38 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
                 </>
               )}
             </button>
+
+            {onSplitAtPlayhead && (
+              <button
+                onClick={onSplitAtPlayhead}
+                title="قص وفصل الفيديو عند موضع المؤشر الحالي"
+                className="h-8 px-3 rounded-lg bg-red-950/40 hover:bg-red-900/50 text-red-200 hover:text-white flex items-center gap-1.5 transition-all border border-red-500/40 text-xs font-bold shadow-sm active:scale-95"
+              >
+                <Scissors className="w-3.5 h-3.5 text-red-300" />
+                <span className="hidden sm:inline">قص عند المؤشر ({currentTime.toFixed(1)}s)</span>
+                <span className="sm:hidden">قص ({currentTime.toFixed(1)}s)</span>
+              </button>
+            )}
+
+            {onTrimBeforePlayhead && currentTime > 0.5 && (
+              <button
+                onClick={onTrimBeforePlayhead}
+                title="حذف ما قبل المؤشر"
+                className="h-8 px-2.5 rounded-lg bg-[#202226] hover:bg-[#2B2C30] text-[#C4C7C8] hover:text-white hidden md:flex items-center gap-1 transition-all border border-[#36373B] text-[11px]"
+              >
+                <span>قص ما قبله</span>
+              </button>
+            )}
+
+            {onTrimAfterPlayhead && currentTime < (draft.duration || 15) - 0.5 && (
+              <button
+                onClick={onTrimAfterPlayhead}
+                title="حذف ما بعد المؤشر"
+                className="h-8 px-2.5 rounded-lg bg-[#202226] hover:bg-[#2B2C30] text-[#C4C7C8] hover:text-white hidden md:flex items-center gap-1 transition-all border border-[#36373B] text-[11px]"
+              >
+                <span>قص ما بعده</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2 text-xs text-[#8E9192]">
