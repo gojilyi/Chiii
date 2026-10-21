@@ -1,0 +1,6 @@
+{
+  "name": "الشيخ العيد - استوديو مونتاج الفيديو الهادف",
+  "description": "تطبيق مونتاج وتحرير الفيديو الإسلامي والهادف بمعايير Material Design 3 مع دعم FFmpeg وحفظ المشاريع وكتم واستبدال الصوت",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
