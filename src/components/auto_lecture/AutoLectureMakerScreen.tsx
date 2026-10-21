@@ -593,9 +593,9 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
 
   // Generate .ass and FFmpeg Kit Command
   const assSubtitles = generateASS(selectedLesson.words, fontFamily);
-  const ffmpegCommand = `ffmpeg -loop 1 -i "${selectedBg.assetPath}" -i "assets/audio/sheikh_lesson.mp3" \\
+  const ffmpegCommand = `ffmpeg -y -loop 1 -framerate 30 -i "${selectedBg.assetPath}" -i "assets/audio/sheikh_lesson.mp3" \\
   -vf "ass='assets/subtitles/lesson_karaoke.ass':fontsdir='assets/fonts'" \\
-  -c:v libx264 -tune stillimage -preset medium -crf 20 \\
+  -c:v libx264 -preset ultrafast -tune stillimage \\
   -c:a aac -b:a 192k -shortest -pix_fmt yuv420p output_auto_lesson.mp4`;
 
   // Real in-browser video generator (MediaRecorder stream to video)

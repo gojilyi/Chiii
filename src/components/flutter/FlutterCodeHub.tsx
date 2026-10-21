@@ -738,24 +738,24 @@ class FFmpegService {
   {
     path: 'lib/services/video_exporter.dart',
     filename: 'video_exporter.dart',
-    description: 'دالة ومتحكم تصدير دمج الصورة والصوت إلى فيديو MP4 متوافق تلقائياً باستخدام FFmpeg Kit ومتابعة النسبة المئوية',
+    description: 'دالة ومتحكم تصدير دمج الصورة والصوت إلى فيديو MP4 متوافق مع -framerate 30 و -preset ultrafast',
     code: `import 'dart:io';
 import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter/return_code.dart';
 import 'package:path_provider/path_provider.dart';
 
 class VideoExporter {
-  /// دالة دمج الصورة والصوت لإنتاج فيديو متوافق الطول تلقائياً
-  Future<String?> exportImageAndAudioToVideo({
-    required String imagePath,
-    required String audioPath,
-    required Function(double) onProgress, // لمتابعة النسبة المئوية للتصدير
-    double? totalAudioDurationSeconds, // مدة الصوت الإجمالية بالثواني لحساب النسبة المئوية (اختياري)
+  /// دالة دمج الصورة والصوت لإنتاج فيديو متوافق كلياً مع مشغلات الموبايل
+  /// -framerate 30 هو الحل الجذري الذي يضمن تحويل الصورة الثابتة إلى دفق فيديو متصل
+  Future<String?> exportVideo({
+    required String imagePath, // المسار الفعلي للصورة التي يختارها المستخدم
+    required String audioPath, // المسار الفعلي لتسجيل الشيخ
+    Function(double progress)? onProgress, // اختياري لمتابعة التقدم
   }) async {
     try {
-      // 1. تحديد مسار حفظ الفيديو النهائي بصيغة mp4 في جهاز المستخدم
       final Directory extDir = await getTemporaryDirectory();
-      final String outputPath = '\${extDir.path}/الشيخ_العيد_\${DateTime.now().millisecondsSinceEpoch}.mp4';
+      // تأكد أن المسار ينتهي بصيغة .mp4 وإلا سيتم استخراجه كصورة
+      final String outputPath = '\${extDir.path}/export_\${DateTime.now().millisecondsSinceEpoch}.mp4';
 
       // حذف أي ملف قديم بنفس الاسم لمنع الأخطاء
       final file = File(outputPath);
@@ -763,55 +763,49 @@ class VideoExporter {
         await file.delete();
       }
 
-      // 2. أمر FFmpeg السحري لحل المشاكل:
-      // - loop 1: يكرر الصورة الثابتة بلا نهاية لتصبح فيديو.
-      // - i imagePath: مسار الصورة المدخلة.
-      // - i audioPath: مسار الصوت المدخل.
-      // - c:v libx264: مشفر الفيديو القياسي ليعمل كفيديو وليس كصورة.
-      // - tune stillimage: يحسن جودة الفيديو الذي أصله صورة ثابتة.
-      // - c:a aac: مشفر الصوت لضمان دمجه وسماعه.
-      // - b:a 192k: جودة صوت عالية للدرس.
-      // - pix_fmt yuv420p: صيغة الألوان القياسية ليعمل الفيديو على كل الهواتف ولا يظهر كصورة أو شاشة سوداء.
-      // - shortest: أهم أمر! ينهي الفيديو فوراً عند انتهاء الصوت، مهما كان الصوت طويلاً (ساعة أو أكثر).
+      // الأمر البرمجي المصحح:
+      // -y : للموافقة التلقائية على استبدال الملفات لتفادي تعليق الكود.
+      // -loop 1 : يجب أن تكون قبل إدخال الصورة لتكرارها.
+      // -framerate 30 : هذا هو الحل الجذري الذي يحول الصورة إلى دفق فيديو (Video Stream).
+      // -i : إدخال الصورة ثم إدخال الصوت.
+      // -c:v libx264 و -pix_fmt yuv420p : ترميز إجباري ليعمل كفيديو على جميع الأجهزة.
+      // -preset ultrafast : سرعة معالجة فائقة جداً.
+      // -tune stillimage : تحسين جودة الصورة الثابتة وضغط الحجم.
+      // -shortest : هذا الأمر يوقف تصدير الفيديو فور انتهاء تسجيل الشيخ تماماً.
       final String ffmpegCommand = 
-          '-loop 1 -i "\$imagePath" -i "\$audioPath" -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest "\$outputPath"';
+          '-y -loop 1 -framerate 30 -i "\$imagePath" -i "\$audioPath" -c:v libx264 -preset ultrafast -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest "\$outputPath"';
 
-      print("بدء عملية التصدير بالأمر: \$ffmpegCommand");
+      print("جاري التصدير بالأمر: \$ffmpegCommand");
 
-      // 3. تشغيل العملية ومتابعة التقدم (لحل مشكلة الفيديوهات الطويلة)
       final session = await FFmpegKit.executeAsync(
         ffmpegCommand,
         (session) async {
           final returnCode = await session.getReturnCode();
           if (ReturnCode.isSuccess(returnCode)) {
-            print("تم التصدير بنجاح! مسار الفيديو: \$outputPath");
-            onProgress(1.0); // 100%
+            print("نجاح! الفيديو النهائي متوفر هنا: \$outputPath");
+            if (onProgress != null) onProgress(1.0);
           } else {
-            print("فشل التصدير. كود الخطأ: \$returnCode");
+            // طباعة سجل الأخطاء لمعرفة سبب الفشل إن حدث
+            final logs = await session.getLogs();
+            for (var log in logs) {
+              print(log.getMessage());
+            }
           }
         },
         (log) {
-          // لطباعة مجريات المعالجة في أندرويد ستوديو
+          // طباعة مجريات المعالجة في الكونسول
           print(log.getMessage());
         },
         (statistics) {
-          // حساب نسبة التقدم للفيديوهات الطويلة
-          final processedMs = statistics.getTime();
-          if (processedMs > 0) {
-            print("الوقت المعالج حالياً: \$processedMs مللي ثانية");
-            if (totalAudioDurationSeconds != null && totalAudioDurationSeconds > 0) {
-              final progressRatio = (processedMs / 1000.0) / totalAudioDurationSeconds;
-              onProgress(progressRatio.clamp(0.0, 0.99));
-            } else {
-              onProgress(processedMs / 1000.0);
-            }
+          if (onProgress != null && statistics.getTime() > 0) {
+            onProgress(statistics.getTime() / 1000.0);
           }
-        }
+        },
       );
 
       return outputPath;
     } catch (e) {
-      print("حدث خطأ غير متوقع أثناء التصدير: \$e");
+      print("حدث خطأ: \$e");
       return null;
     }
   }
