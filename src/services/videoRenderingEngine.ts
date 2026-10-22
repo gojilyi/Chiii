@@ -149,25 +149,42 @@ export class VideoRenderingEngine {
       activeOscillators.push(osc);
     });
 
-    // 5. Connect user audio element if provided
+    // 5. Connect user audio track with high fidelity
+    let audioBufferSource: AudioBufferSourceNode | null = null;
     let audioElement: HTMLAudioElement | null = null;
+
     if (draft.replacedAudio?.audioUrl) {
+      const audioUrl = draft.replacedAudio.audioUrl;
+      const audioTrimStart = draft.replacedAudio.trimStart || 0;
+      const userVolume = Math.max(0, Math.min(1, draft.replacedAudioVolume ?? 0.85));
+
+      const trackGain = audioCtx.createGain();
+      trackGain.gain.setValueAtTime(userVolume, audioCtx.currentTime);
+      trackGain.connect(masterGain);
+
       try {
-        audioElement = new Audio();
-        if (draft.replacedAudio.audioUrl.startsWith('http')) {
-          audioElement.crossOrigin = 'anonymous';
+        const response = await fetch(audioUrl);
+        const arrayBuf = await response.arrayBuffer();
+        const decodedBuffer = await audioCtx.decodeAudioData(arrayBuf);
+        audioBufferSource = audioCtx.createBufferSource();
+        audioBufferSource.buffer = decodedBuffer;
+        audioBufferSource.connect(trackGain);
+        audioBufferSource.start(0, audioTrimStart, totalDuration);
+        onProgress?.(25, 'تم تجهيز مسار صوت الشيخ وتوافقه مع الخط الزمني...', `[audio] Decoded ${decodedBuffer.duration.toFixed(1)}s audio buffer`);
+      } catch (decodeErr) {
+        console.warn('AudioBuffer decode failed, fallback to Audio element:', decodeErr);
+        try {
+          audioElement = new Audio();
+          if (audioUrl.startsWith('http')) audioElement.crossOrigin = 'anonymous';
+          audioElement.src = audioUrl;
+          audioElement.volume = userVolume;
+          if (audioTrimStart > 0) audioElement.currentTime = audioTrimStart;
+          const sourceNode = audioCtx.createMediaElementSource(audioElement);
+          sourceNode.connect(trackGain);
+          await audioElement.play().catch(() => {});
+        } catch (e2) {
+          console.warn('HTMLAudio fallback error:', e2);
         }
-        audioElement.src = draft.replacedAudio.audioUrl;
-        audioElement.volume = Math.max(0, Math.min(1, draft.replacedAudioVolume || 0.8));
-        const audioTrimStart = draft.replacedAudio.trimStart || 0;
-        if (audioTrimStart > 0) {
-          audioElement.currentTime = audioTrimStart;
-        }
-        const sourceNode = audioCtx.createMediaElementSource(audioElement);
-        sourceNode.connect(masterGain);
-        await audioElement.play().catch(() => {});
-      } catch (err) {
-        console.warn('MediaElementSource error or CORS, relying on synthesizer:', err);
       }
     }
 
@@ -196,18 +213,26 @@ export class VideoRenderingEngine {
 
     mediaRecorder.start(100);
 
-    onProgress?.(30, 'بدء الرندرة اللحظية للإطارات والمؤثرات...', `[ffmpeg/recorder] Started encoding pipeline @ ${fps}fps`);
+    onProgress?.(30, 'بدء الرندرة والدمج اللحظي للفيديو والصوت...', `[ffmpeg/recorder] Started real-time synthesis pipeline @ ${fps}fps (${totalDuration}s)`);
 
-    // 8. Render loop across duration
-    const totalFrames = Math.round(totalDuration * fps);
+    // 8. Wall-clock driven render loop for exact audio-video synchronization
+    const startTime = performance.now();
+    const totalDurationMs = totalDuration * 1000;
+    const totalFrames = Math.max(1, Math.round(totalDuration * fps));
     let frameIndex = 0;
 
     return new Promise<RenderResult>((resolve) => {
       const renderNextFrame = () => {
-        if (frameIndex >= totalFrames) {
+        const now = performance.now();
+        const elapsedMs = now - startTime;
+        const currentTime = Math.min(totalDuration, elapsedMs / 1000);
+        const animTime = currentTime;
+
+        if (elapsedMs >= totalDurationMs) {
           onProgress?.(95, 'جاري حزم بيانات الفيديو وتوليد ملف MP4/WebM...', '[recorder] Finalizing container metadata');
           
           try {
+            audioBufferSource?.stop();
             audioElement?.pause();
             activeOscillators.forEach((osc) => {
               try { osc.stop(); osc.disconnect(); } catch {}
@@ -234,9 +259,6 @@ export class VideoRenderingEngine {
           mediaRecorder.stop();
           return;
         }
-
-        const currentTime = (frameIndex / totalFrames) * totalDuration;
-        const animTime = currentTime;
 
         // --- DRAW FRAME COMPOSITE ---
 
@@ -460,12 +482,13 @@ export class VideoRenderingEngine {
 
         frameIndex++;
 
-        // Update progress callback every 4 frames
-        if (frameIndex % 4 === 0 || frameIndex === totalFrames) {
-          const pct = Math.min(94, Math.round(30 + (frameIndex / totalFrames) * 64));
+        // Update progress callback regularly
+        if (frameIndex % 4 === 0 || elapsedMs >= totalDurationMs) {
+          const progressRatio = Math.min(1, elapsedMs / totalDurationMs);
+          const pct = Math.min(94, Math.round(30 + progressRatio * 64));
           const sec = currentTime.toFixed(1);
           const statLog = `frame=${frameIndex.toString().padStart(4, ' ')} fps=${fps} time=00:00:${sec.padStart(4, '0')} progress=${pct}%`;
-          onProgress?.(pct, `جاري ترميز إطارات الفيديو (${frameIndex}/${totalFrames} إطار)...`, statLog);
+          onProgress?.(pct, `جاري ترميز إطارات الفيديو (${frameIndex} إطار - ${sec}s / ${totalDuration.toFixed(1)}s)...`, statLog);
         }
 
         requestAnimationFrame(renderNextFrame);

@@ -774,41 +774,18 @@ export const MediaClipsModal: React.FC<MediaClipsModalProps> = ({
               </div>
             )}
 
-            {/* Global Video Trimming Box */}
-            <div className="p-4 rounded-xl bg-[#121316] border border-[#2B2C30] space-y-2.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-[#E3E2E6] flex items-center gap-1.5">
-                  <Film className="w-3.5 h-3.5 text-[#89F8C7]" />
-                  <span>قص وتحديد مدة الفيديو الكلية (Timeline Duration):</span>
-                </span>
-                <span className="font-mono text-[#89F8C7]">{draft.duration} ثانية</span>
+            {/* Automatic Audio-Driven Duration Indicator (إلغاء التحديد اليدوي حسب طلب المستخدم) */}
+            <div className="p-3.5 rounded-xl bg-gradient-to-r from-[#006C4C]/25 to-[#121316] border border-[#89F8C7]/35 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <Film className="w-4 h-4 text-[#89F8C7]" />
+                <div>
+                  <span className="font-bold text-[#E3E2E6]">مدة الفيديو مطابقة للتسجيل الصوتي تلقائياً</span>
+                  <p className="text-[11px] text-[#8E9192]">يتم تحديد مدة الفيديو بحسب طول تسجيل الشيخ المرفوع بدون أي فراغ</p>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min="5"
-                  max="120"
-                  step="1"
-                  value={draft.duration}
-                  onChange={(e) => {
-                    const newDur = parseInt(e.target.value) || 15;
-                    onUpdateDraft({ ...draft, duration: newDur });
-                  }}
-                  className="flex-1 accent-[#89F8C7] h-1.5 bg-[#202226] rounded-lg"
-                />
-                <input
-                  type="number"
-                  min="5"
-                  max="300"
-                  value={draft.duration}
-                  onChange={(e) => {
-                    const newDur = Math.max(5, parseInt(e.target.value) || 15);
-                    onUpdateDraft({ ...draft, duration: newDur });
-                  }}
-                  className="w-16 bg-[#202226] border border-[#2B2C30] rounded-lg p-1 text-xs text-[#89F8C7] font-mono text-center outline-none"
-                />
-                <span className="text-xs text-[#8E9192]">ثانية</span>
-              </div>
+              <span className="font-mono text-[#89F8C7] bg-[#1A1C1E] px-3 py-1 rounded-lg border border-[#2B2C30] font-bold text-xs">
+                {draft.duration} ثانية
+              </span>
             </div>
 
           </div>

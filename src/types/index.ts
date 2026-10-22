@@ -150,7 +150,7 @@ export interface AudioTrackConfig {
   id: string;
   title: string;
   artist: string;
-  category: 'quran' | 'adhan' | 'nasheed' | 'ambient';
+  category: 'quran' | 'adhan' | 'nasheed' | 'ambient' | 'sheikh_recording';
   duration: number; // seconds
   audioUrl?: string;
   isCustomUpload?: boolean;

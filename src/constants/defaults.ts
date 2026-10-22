@@ -288,44 +288,9 @@ export const DEFAULT_PARTICLE_OVERLAYS: ParticleOverlayItem[] = [
   },
 ];
 
-export const DEFAULT_AUDIO_LIBRARY: AudioTrackConfig[] = [
-  {
-    id: 'track-recitation-1',
-    title: 'تلاوة خاشعة - سورة الفاتحة',
-    artist: 'الشيخ العيد',
-    category: 'quran',
-    duration: 35,
-    type: 'synth',
-    synthPreset: 'spiritual_drone'
-  },
-  {
-    id: 'track-adhan',
-    title: 'أذان الفجر الندي',
-    artist: 'مقام البيات',
-    category: 'adhan',
-    duration: 48,
-    type: 'synth',
-    synthPreset: 'adhan_harmony'
-  },
-  {
-    id: 'track-nasheed-1',
-    title: 'أنشودة هادفة - يا خالق الأكوان',
-    artist: 'كورال هادف (بدون إيقاع)',
-    category: 'nasheed',
-    duration: 60,
-    type: 'synth',
-    synthPreset: 'choral_peace'
-  },
-  {
-    id: 'track-ambient-peace',
-    title: 'سكينة الفجر وخرير الماء',
-    artist: 'أصوات طبيعة هادئة',
-    category: 'ambient',
-    duration: 120,
-    type: 'synth',
-    synthPreset: 'dawn_nature'
-  }
-];
+// لا توجد أصوات وهمية؛ الاعتماد حصرياً على التسجيلات الحقيقية لصوت الشيخ المرفوعة أو المسجلة
+export const DEFAULT_AUDIO_LIBRARY: AudioTrackConfig[] = [];
+
 
 export const QURANIC_VERSE_PRESETS = [
   {
