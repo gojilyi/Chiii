@@ -15,7 +15,9 @@ import {
   Smartphone,
   Monitor,
   Square,
-  PenTool
+  PenTool,
+  Scissors,
+  Clock
 } from 'lucide-react';
 import { ProjectDraft, TextOverlay, SpiritualEffect, AudioTrackConfig, AspectRatioType, ParticleOverlayItem, MediaClip } from '../types';
 import { PreviewPlayer } from './editor/PreviewPlayer';
@@ -29,6 +31,7 @@ import { CalligraphyAudioModal } from './editor/dialogs/CalligraphyAudioModal';
 import { ParticleOverlaysModal } from './editor/dialogs/ParticleOverlaysModal';
 import { MediaClipsModal } from './editor/dialogs/MediaClipsModal';
 import { VideoTrimModal } from './editor/dialogs/VideoTrimModal';
+import { EasyAudioTrimModal } from './editor/dialogs/EasyAudioTrimModal';
 import { EditorWorkspaceTabs } from './editor/EditorWorkspaceTabs';
 import { StorageService } from '../services/storageService';
 import { audioEngine } from '../services/audioEngine';
@@ -59,6 +62,7 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [isCalligraphyModalOpen, setIsCalligraphyModalOpen] = useState(false);
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
+  const [isAudioTrimModalOpen, setIsAudioTrimModalOpen] = useState(false);
 
   const duration = draft.duration || 15;
   const playIntervalRef = useRef<number | null>(null);
@@ -268,6 +272,48 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
     StorageService.saveProject(updated);
   };
 
+  // Easy Audio Trimmer Save Handler
+  const handleSaveAudioTrim = (trimStart: number, trimEnd: number, syncVideoDuration: boolean) => {
+    if (!draft.replacedAudio) return;
+    const updatedAudio: AudioTrackConfig = {
+      ...draft.replacedAudio,
+      trimStart,
+      trimEnd,
+    };
+    const trimmedDuration = Math.max(0.5, +(trimEnd - trimStart).toFixed(2));
+    const updated: ProjectDraft = {
+      ...draft,
+      replacedAudio: updatedAudio,
+      duration: syncVideoDuration ? trimmedDuration : draft.duration,
+      syncDurationToAudio: syncVideoDuration,
+    };
+    setDraft(updated);
+    onUpdateDraft(updated);
+    StorageService.saveProject(updated);
+    setCurrentTime(0);
+    audioEngine.stop();
+    setSavedNotification(true);
+    setTimeout(() => setSavedNotification(false), 2500);
+  };
+
+  // Sync Video Duration to Audio length (الفيديو حسب وقت الصوت)
+  const handleSyncDurationToAudio = (customDur?: number) => {
+    const audioDur = customDur || (draft.replacedAudio?.trimEnd && draft.replacedAudio.trimStart !== undefined
+      ? +(draft.replacedAudio.trimEnd - draft.replacedAudio.trimStart).toFixed(2)
+      : draft.replacedAudio?.duration || draft.duration || 15);
+
+    const updated: ProjectDraft = {
+      ...draft,
+      duration: Math.max(1, +audioDur.toFixed(2)),
+      syncDurationToAudio: true,
+    };
+    setDraft(updated);
+    onUpdateDraft(updated);
+    StorageService.saveProject(updated);
+    setSavedNotification(true);
+    setTimeout(() => setSavedNotification(false), 2500);
+  };
+
   return (
     <div className="min-h-[calc(100vh-65px)] pb-12 pt-4 px-4 sm:px-6 lg:px-8 space-y-5 max-w-7xl mx-auto">
       
@@ -333,6 +379,28 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
             <PenTool className="w-3.5 h-3.5 text-[#FFDF9E]" />
             <span>خط الريشة (STT)</span>
           </button>
+
+          {/* Easy Audio Trimmer button */}
+          <button
+            onClick={() => setIsAudioTrimModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 text-[#89F8C7] text-xs font-semibold border border-emerald-500/40 flex items-center gap-1.5 transition-all shadow-sm active:scale-[0.98]"
+            title="فتح مقص الصوت السهل والدقيق لقص بداية ونهاية الصوت"
+          >
+            <Scissors className="w-3.5 h-3.5 text-[#89F8C7]" />
+            <span>مقص الصوت السهل</span>
+          </button>
+
+          {/* Sync duration to audio button */}
+          {draft.replacedAudio && (
+            <button
+              onClick={() => handleSyncDurationToAudio()}
+              className="px-3 py-1.5 rounded-xl bg-[#006C4C]/35 hover:bg-[#006C4C]/65 text-[#89F8C7] text-xs font-semibold border border-[#89F8C7]/40 flex items-center gap-1.5 transition-all shadow-sm active:scale-[0.98]"
+              title="جعل مدة الفيديو مطابقة لوقت الصوت تماماً (الفيديو حسب وقت الصوت)"
+            >
+              <Clock className="w-3.5 h-3.5 text-[#89F8C7]" />
+              <span>الفيديو حسب وقت الصوت</span>
+            </button>
+          )}
 
           {/* Quick Mute Indicator Button */}
           <button
@@ -422,6 +490,8 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
         onOpenEffectsModal={() => setIsEffectsModalOpen(true)}
         onOpenMediaModal={() => setIsMediaModalOpen(true)}
         onOpenTrimModal={() => setIsTrimModalOpen(true)}
+        onOpenAudioTrimModal={() => setIsAudioTrimModalOpen(true)}
+        onSyncDurationToAudio={() => handleSyncDurationToAudio()}
         onDeleteClip={handleDeleteClip}
         onSplitAtPlayhead={handleSplitAtPlayhead}
         onTrimBeforePlayhead={handleTrimBeforePlayhead}
@@ -485,6 +555,16 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
           setDraft(updated);
           onUpdateDraft(updated);
         }}
+        onOpenAudioTrim={() => setIsAudioTrimModalOpen(true)}
+        onSyncDurationToAudio={handleSyncDurationToAudio}
+      />
+
+      <EasyAudioTrimModal
+        isOpen={isAudioTrimModalOpen}
+        onClose={() => setIsAudioTrimModalOpen(false)}
+        draft={draft}
+        currentTime={currentTime}
+        onSaveAudioTrim={handleSaveAudioTrim}
       />
 
       <SpiritualEffectsModal

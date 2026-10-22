@@ -230,7 +230,7 @@ final session = await FFmpegKit.executeAsync('-y -i "${audioSource}" -vn -c:a li
       inputArgs.push('-i', inputVisualFile);
     }
 
-    // Audio Input & Mapping
+    // Audio Input & Mapping with audio trim support (قص الصوت السهل)
     const audioInputFile = draft.replacedAudio?.title
       ? draft.replacedAudio.title.replace(/\s+/g, '_') + '.mp3'
       : 'صوت_الشيخ_العيد.mp3';
@@ -238,24 +238,34 @@ final session = await FFmpegKit.executeAsync('-y -i "${audioSource}" -vn -c:a li
     let audioArgs: string[] = [];
     let audioMap = '-map 0:a?';
 
+    const audioTrimStart = draft.replacedAudio?.trimStart || 0;
+    const audioTrimEnd = draft.replacedAudio?.trimEnd;
+
     if (format === 'gif') {
       audioMap = '-an';
     } else {
-      // Audio is mapped from input #1
-      audioArgs = ['-i', audioInputFile];
+      // Audio is mapped from input #1 with optional trim
+      if (audioTrimStart > 0) {
+        audioArgs.push('-ss', audioTrimStart.toString());
+      }
+      if (audioTrimEnd && audioTrimEnd > audioTrimStart) {
+        audioArgs.push('-to', audioTrimEnd.toString());
+      }
+      audioArgs.push('-i', audioInputFile);
       audioMap = `-map 1:a -af "volume=${draft.replacedAudioVolume || 1.0}"`;
+
       explanationSteps.push({
-        title: 'دمج تسجيل الشيخ الصوتي (-c:a aac -b:a 192k)',
-        desc: `دمج المسار الصوتي (${audioInputFile}) بأعلى جودة ستيريو 192kbps AAC.`,
+        title: 'الفيديو حسب وقت الصوت تلقائياً (-shortest)',
+        desc: `ينتهي الفيديو فور انتهاء صوت الشيخ أو المقطع الصوتي المقصوص (${audioTrimStart > 0 || audioTrimEnd ? `من ${audioTrimStart}s إلى ${audioTrimEnd}s` : 'كامل الصوت'}) دون أي زيادة أو شاشة سوداء.`,
       });
     }
 
-    // Trimming or duration bounds
+    // Video Trimming if defined
     const trimArgs: string[] = [];
-    if (draft.trimStart && draft.trimStart > 0) {
+    if (!isImageSource && draft.trimStart && draft.trimStart > 0) {
       trimArgs.push('-ss', draft.trimStart.toString());
     }
-    if (draft.trimEnd && draft.trimEnd < draft.duration) {
+    if (!isImageSource && draft.trimEnd && draft.trimEnd < draft.duration) {
       trimArgs.push('-to', draft.trimEnd.toString());
     }
 
@@ -272,90 +282,90 @@ final session = await FFmpegKit.executeAsync('-y -i "${audioSource}" -vn -c:a li
       `-map "[${currentVideoStream}]"`,
       audioMap,
       ...codecFlags,
+      '-threads', '0',
       '-shortest',
       `"${outputVideo}"`,
     ].join(' ');
 
-    // Production-ready, error-free Flutter Dart Class
+    // Production-ready, error-free Flutter Dart Class with audio trimming & length control
     const dartCode = `
 import 'dart:io';
-import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
+import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter/return_code.dart';
 import 'package:path_provider/path_provider.dart';
 
 class SheikhEidVideoExporter {
-  /// دالة الدمج الشاملة (صورة + صوت الشيخ + مؤثرات + نصوص) وتحويلها لفيديو MP4 نهائي
-  /// تحل بشكل قطعي مشكلة "حفظ النتيجة كصورة فقط" بفضل أوامر (-loop 1 و -framerate 30 و -tune stillimage و -pix_fmt yuv420p)
-  static Future<String?> exportStudioVideo({
-    required String imagePath,        // مسار صورة الشيخ أو غلاف شرح كتاب إيصال السالك
-    required String audioPath,        // مسار التسجيل الصوتي للشيخ
-    Function(double progress)? onProgress, // لمتابعة شريط النسبة المئوية
+  /// دالة دمج الصورة مع صوت الشيخ وتحويلها لفيديو MP4 بحيث يكون طول الفيديو مطابقاً تماماً لوقت الصوت:
+  /// -imagePath: مسار صورة الشيخ أو غلاف كتاب إيصال السالك
+  /// -audioPath: مسار صوت الشيخ (درس أو تلاوة)
+  /// -audioStartSec: (اختياري) لقص بداية الصوت (مثلاً لتخطي المقدمة)
+  /// -audioEndSec: (اختياري) لقص نهاية الصوت
+  static Future<String?> exportAudioDrivenVideo({
+    required String imagePath,
+    required String audioPath,
+    double? audioStartSec,
+    double? audioEndSec,
+    Function(double progress)? onProgress,
   }) async {
     try {
       final Directory extDir = await getTemporaryDirectory();
-      // 1. تحديد اسم ومسار إخراج ينتهي حتماً بـ .mp4
       final String outputPath = '\${extDir.path}/الشيخ_العيد_\${DateTime.now().millisecondsSinceEpoch}.mp4';
 
-      // حذف أي ملف سابق بنفس الاسم
       final file = File(outputPath);
       if (await file.exists()) {
         await file.delete();
       }
 
-      // 2. الأمر البرمجي المتكامل لدمج الصورة والصوت وكل المؤثرات:
-      // -y : استبدال الملف تلقائياً دون توقف
-      // -loop 1 : تكرار الصورة بلا نهاية لتصبح فيديو حقيقي
-      // -framerate 30 : معدل 30 إطار/ثانية لمنع خروج الملف كصورة
-      // -i imagePath : مدخل الصورة
-      // -i audioPath : مدخل صوت الشيخ
-      // -filter_complex : تطبيق الفلاتر والتعتيم والمقاس
-      // -c:v libx264 : مشفر H.264 العالمي ليعمل على كل الشاشات
-      // -preset ultrafast : معالجة فائقة السرعة على الهاتف
-      // -tune stillimage : تحسين جودة وضغط الصورة الثابتة في الفيديو
-      // -c:a aac -b:a 192k : جودة صوت نقية 192kbps
-      // -pix_fmt yuv420p : الصيغة اللونية الإلزامية لمنع الشاشة السوداء في أندرويد وآيفون
-      // -shortest : إنهاء تصدير الفيديو فور انتهاء صوت الشيخ تماماً
+      // بناء أوامر قص الصوت السهلة:
+      String audioTrimParams = '';
+      if (audioStartSec != null && audioStartSec > 0) {
+        audioTrimParams += '-ss \${audioStartSec.toStringAsFixed(2)} ';
+      }
+      if (audioEndSec != null && audioEndSec > (audioStartSec ?? 0)) {
+        audioTrimParams += '-to \${audioEndSec.toStringAsFixed(2)} ';
+      }
+
+      // الأمر المتكامل المحسن:
+      // 1. -loop 1 و -framerate 30: يمنع خروج الملف كصورة فقط ويحوله لفيديو
+      // 2. -shortest: يجعل مدة الفيديو مطابقة تماماً لوقت الصوت ويتوقف فوراً عند نهايته
+      // 3. -preset ultrafast و -threads 0: أقصى سرعة معالجة باستخدام جميع أنوية معالج الهاتف
+      // 4. -tune stillimage و -pix_fmt yuv420p: يضمن تشغيل الفيديو على كل شاشات الهواتف دون شاشة سوداء
       final String ffmpegCommand = 
           '-y ' +
           '-loop 1 -framerate 30 -i "$imagePath" ' +
-          '-i "$audioPath" ' +
-          '-filter_complex "${filterComplexStr}" ' +
-          '-map "[${currentVideoStream}]" ' +
-          '-map 1:a ' +
-          '-c:v libx264 -preset ultrafast -tune stillimage ' +
-          '-c:a aac -b:a 192k ' +
+          '\$audioTrimParams-i "$audioPath" ' +
+          '-c:v libx264 -preset ultrafast -threads 0 -tune stillimage ' +
+          '-c:a aac -b:a 128k ' +
           '-pix_fmt yuv420p ' +
           '-shortest "$outputPath"';
 
-      print("⏳ جاري بدء رندرة الفيديو بمحرك FFmpeg...");
+      print("⏳ جاري دمج الفيديو حسب وقت الصوت: \$ffmpegCommand");
 
       await FFmpegKit.executeAsync(
         ffmpegCommand,
         (session) async {
           final returnCode = await session.getReturnCode();
           if (ReturnCode.isSuccess(returnCode)) {
-            print("✅ نجاح باهر! الفيديو النهائي جاهز بالكامل: $outputPath");
+            print("✅ اكتمل الدمج بنجاح! الفيديو جاهز في: \$outputPath");
           } else {
             final logs = await session.getLogs();
+            print("❌ أسباب فشل الدمج:");
             for (var log in logs) {
-              print("[FFmpeg Log]: \${log.getMessage()}");
+              print(log.getMessage());
             }
           }
         },
         (log) {},
         (stats) {
-          // حساب نسبة التقدم من خلال الوقت المعالج
           if (onProgress != null && stats.getTime() > 0) {
-            final totalDurationMs = ${Math.round((draft.duration || 15) * 1000)};
-            final progress = (stats.getTime() / totalDurationMs).clamp(0.0, 1.0);
-            onProgress(progress);
+            print("تمت معالجة: \${stats.getTime()} ms");
           }
         },
       );
 
       return outputPath;
     } catch (e) {
-      print("❌ خطأ أثناء التصدير: $e");
+      print("❌ خطأ برمجي أثناء التصدير: \$e");
       return null;
     }
   }

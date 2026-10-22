@@ -32,6 +32,8 @@ interface TimelineProps {
   onOpenEffectsModal: () => void;
   onOpenMediaModal?: () => void;
   onOpenTrimModal?: () => void;
+  onOpenAudioTrimModal?: () => void;
+  onSyncDurationToAudio?: () => void;
   onSplitAtPlayhead?: () => void;
   onTrimBeforePlayhead?: () => void;
   onTrimAfterPlayhead?: () => void;
@@ -47,6 +49,8 @@ export const Timeline: React.FC<TimelineProps> = ({
   onOpenEffectsModal,
   onOpenMediaModal,
   onOpenTrimModal,
+  onOpenAudioTrimModal,
+  onSyncDurationToAudio,
   onSplitAtPlayhead,
   onTrimBeforePlayhead,
   onTrimAfterPlayhead,
@@ -222,6 +226,30 @@ export const Timeline: React.FC<TimelineProps> = ({
             >
               <span>قص ما بعده</span>
               <ChevronRight className="w-3.5 h-3.5 text-amber-400" />
+            </button>
+          )}
+
+          {/* Easy Audio Trimmer Modal Button */}
+          {onOpenAudioTrimModal && (
+            <button
+              onClick={onOpenAudioTrimModal}
+              title="قص وتحديد بداية ونهاية تسجيل الشيخ بدقة وسهولة"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 text-[#89F8C7] font-semibold transition-colors border border-emerald-500/40 text-[11px] shadow-sm"
+            >
+              <Scissors className="w-3.5 h-3.5 text-[#89F8C7]" />
+              <span>مقص الصوت السهل</span>
+            </button>
+          )}
+
+          {/* Sync Video Duration to Audio Button */}
+          {onSyncDurationToAudio && draft.replacedAudio && (
+            <button
+              onClick={onSyncDurationToAudio}
+              title="جعل مدة الفيديو مطابقة تماماً لوقت الصوت المختار"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#006C4C]/40 hover:bg-[#006C4C]/70 text-[#89F8C7] font-semibold transition-colors border border-[#89F8C7]/40 text-[11px] shadow-sm"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>الفيديو حسب وقت الصوت</span>
             </button>
           )}
 
@@ -464,16 +492,52 @@ export const Timeline: React.FC<TimelineProps> = ({
                 <div className="w-full flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs font-semibold text-[#89F8C7] truncate">
                     <span>🎵 {draft.replacedAudio.title}</span>
+                    {draft.replacedAudio.trimStart !== undefined && draft.replacedAudio.trimEnd !== undefined && (
+                      <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-600/50 px-1.5 py-0.2 rounded font-mono">
+                        قص: {draft.replacedAudio.trimStart.toFixed(1)}s - {draft.replacedAudio.trimEnd.toFixed(1)}s
+                      </span>
+                    )}
                     <span className="text-[10px] text-[#8E9192]">({Math.round(draft.replacedAudioVolume * 100)}%)</span>
                   </div>
-                  <div className="hidden sm:flex items-center gap-0.5 w-32 h-5">
-                    {Array.from({ length: 24 }).map((_, i) => (
-                      <div
-                        key={i}
-                        className="flex-1 bg-[#00875F] rounded-full"
-                        style={{ height: `${(i % 5 + 2) * 3}px` }}
-                      />
-                    ))}
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {onOpenAudioTrimModal && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenAudioTrimModal();
+                        }}
+                        className="px-2 py-0.5 rounded-md bg-emerald-900/60 hover:bg-emerald-800 text-[#89F8C7] border border-emerald-500/40 text-[10px] font-semibold flex items-center gap-1 transition shadow-sm"
+                        title="فتح مقص الصوت السهل"
+                      >
+                        <Scissors className="w-2.5 h-2.5" />
+                        <span>قص الصوت</span>
+                      </button>
+                    )}
+
+                    {onSyncDurationToAudio && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSyncDurationToAudio();
+                        }}
+                        className="px-2 py-0.5 rounded-md bg-[#006C4C]/40 hover:bg-[#006C4C]/70 text-white border border-[#89F8C7]/30 text-[10px] font-semibold flex items-center gap-1 transition shadow-sm hidden sm:flex"
+                        title="جعل مدة الفيديو مطابقة لوقت هذا الصوت تماماً"
+                      >
+                        <Clock className="w-2.5 h-2.5 text-[#89F8C7]" />
+                        <span>الفيديو حسب وقت الصوت</span>
+                      </button>
+                    )}
+
+                    <div className="hidden md:flex items-center gap-0.5 w-20 h-4">
+                      {Array.from({ length: 16 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="flex-1 bg-[#00875F] rounded-full"
+                          style={{ height: `${(i % 5 + 2) * 2.5}px` }}
+                        />
+                      ))}
+                    </div>
                   </div>
                 </div>
               ) : (

@@ -4,7 +4,7 @@
  */
 
 import React, { useRef } from 'react';
-import { X, VolumeX, Volume2, Music, Upload, Play, Square, Check, Radio } from 'lucide-react';
+import { X, VolumeX, Volume2, Music, Upload, Play, Square, Check, Radio, Scissors, Clock } from 'lucide-react';
 import { AudioTrackConfig } from '../../../types';
 import { DEFAULT_AUDIO_LIBRARY } from '../../../constants/defaults';
 import { audioEngine } from '../../../services/audioEngine';
@@ -20,6 +20,8 @@ interface AudioInsertModalProps {
   onSelectReplacedAudio: (track: AudioTrackConfig | null) => void;
   replacedAudioVolume: number;
   onChangeReplacedVolume: (vol: number) => void;
+  onOpenAudioTrim?: () => void;
+  onSyncDurationToAudio?: (dur: number) => void;
 }
 
 export const AudioInsertModal: React.FC<AudioInsertModalProps> = ({
@@ -33,6 +35,8 @@ export const AudioInsertModal: React.FC<AudioInsertModalProps> = ({
   onSelectReplacedAudio,
   replacedAudioVolume,
   onChangeReplacedVolume,
+  onOpenAudioTrim,
+  onSyncDurationToAudio,
 }) => {
   if (!isOpen) return null;
 
@@ -69,10 +73,13 @@ export const AudioInsertModal: React.FC<AudioInsertModalProps> = ({
         };
         onSelectReplacedAudio(customTrack);
         onToggleMuteOriginal(true);
+        if (onSyncDurationToAudio) {
+          onSyncDurationToAudio(dur);
+        }
         // Automatically start playing so user immediately hears it
         audioEngine.playReplacedTrack(undefined, replacedAudioVolume, audioSrc, 0);
         setPlayingTrackId(customTrack.id);
-        setUploadStatus(`تم تحميل وتشغيل: ${customTrack.title}`);
+        setUploadStatus(`تم تحميل وتشغيل: ${customTrack.title} ومزامنة طول الفيديو مع وقت الصوت (${dur} ثانية)`);
         setTimeout(() => setUploadStatus(null), 4000);
       };
 
@@ -343,6 +350,51 @@ export const AudioInsertModal: React.FC<AudioInsertModalProps> = ({
                   }}
                   className="w-full accent-[#89F8C7] h-1.5 bg-[#2B2C30] rounded-lg"
                 />
+
+                {/* Quick Trim & Sync Duration Actions */}
+                <div className="pt-2.5 mt-2 border-t border-[#2B2C30] flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[11px] text-[#8E9192]">
+                    {replacedAudio.trimStart !== undefined && replacedAudio.trimEnd !== undefined ? (
+                      <span className="text-[#89F8C7] font-semibold">
+                        ✂️ مقصوص: {replacedAudio.trimStart.toFixed(1)}s - {replacedAudio.trimEnd.toFixed(1)}s (المدة: {(replacedAudio.trimEnd - replacedAudio.trimStart).toFixed(1)}s)
+                      </span>
+                    ) : (
+                      <span>الفيديو حسب وقت الصوت ({replacedAudio.duration}s)</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {onOpenAudioTrim && (
+                      <button
+                        onClick={() => {
+                          handleModalClose();
+                          onOpenAudioTrim();
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/80 text-[#89F8C7] border border-emerald-500/40 text-[11px] font-semibold flex items-center gap-1 transition"
+                      >
+                        <Scissors className="w-3 h-3" />
+                        <span>مقص الصوت السهل</span>
+                      </button>
+                    )}
+
+                    {onSyncDurationToAudio && (
+                      <button
+                        onClick={() => {
+                          const targetDur = (replacedAudio.trimEnd && replacedAudio.trimStart !== undefined)
+                            ? (replacedAudio.trimEnd - replacedAudio.trimStart)
+                            : replacedAudio.duration;
+                          onSyncDurationToAudio(targetDur);
+                          setUploadStatus(`تمت مزامنة طول الفيديو ليطابق هذا الصوت تماماً (${targetDur.toFixed(1)} ثانية)`);
+                          setTimeout(() => setUploadStatus(null), 3500);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-[#006C4C] hover:bg-[#00573c] text-white text-[11px] font-semibold flex items-center gap-1 transition shadow-sm"
+                      >
+                        <Clock className="w-3 h-3 text-[#89F8C7]" />
+                        <span>مزامنة طول الفيديو</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>

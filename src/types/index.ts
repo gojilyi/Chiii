@@ -156,6 +156,8 @@ export interface AudioTrackConfig {
   isCustomUpload?: boolean;
   type?: 'synth' | 'file';
   synthPreset?: string;
+  trimStart?: number; // seconds
+  trimEnd?: number;   // seconds
 }
 
 export interface ProjectDraft {
@@ -165,6 +167,7 @@ export interface ProjectDraft {
   createdAt: number;
   updatedAt: number;
   duration: number; // seconds (default e.g. 15 or video duration)
+  syncDurationToAudio?: boolean; // When true, duration strictly matches audio length
   videoSourceUrl: string;
   videoSourceName: string;
   isCustomVideo?: boolean;

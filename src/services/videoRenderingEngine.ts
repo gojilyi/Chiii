@@ -55,11 +55,20 @@ export class VideoRenderingEngine {
     fps: number = 30,
     onProgress?: RenderProgressCallback
   ): Promise<RenderResult> {
-    const totalDuration = Math.min(60, Math.max(3, draft.duration || 15));
+    // Calculate exact video duration strictly according to audio track length (الفيديو حسب وقت الصوت)
+    let totalDuration = 15;
+    if (draft.replacedAudio) {
+      const audioStart = draft.replacedAudio.trimStart || 0;
+      const audioEnd = draft.replacedAudio.trimEnd || draft.replacedAudio.duration || draft.duration || 15;
+      totalDuration = Math.max(1, +(audioEnd - audioStart).toFixed(2));
+    } else {
+      totalDuration = Math.max(1, +(draft.duration || 15).toFixed(2));
+    }
+
     const formatInfo = this.getSupportedVideoFormat();
     const filename = `الشيخ_العيد_${draft.title ? draft.title.replace(/\s+/g, '_') : 'مقطع'}_${resolution}.${formatInfo.extension}`;
 
-    onProgress?.(5, 'جاري تهيئة لوحة الرندرة ومسارات المعالجة...', `[render] Target output: ${filename} (${formatInfo.mimeType})`);
+    onProgress?.(5, 'جاري تهيئة لوحة الرندرة ومسارات المعالجة...', `[render] Target output: ${filename} (${totalDuration}s @ ${formatInfo.mimeType})`);
 
     // 1. Calculate rendering canvas dimensions based on aspect ratio & resolution
     const getDims = () => {
@@ -150,6 +159,10 @@ export class VideoRenderingEngine {
         }
         audioElement.src = draft.replacedAudio.audioUrl;
         audioElement.volume = Math.max(0, Math.min(1, draft.replacedAudioVolume || 0.8));
+        const audioTrimStart = draft.replacedAudio.trimStart || 0;
+        if (audioTrimStart > 0) {
+          audioElement.currentTime = audioTrimStart;
+        }
         const sourceNode = audioCtx.createMediaElementSource(audioElement);
         sourceNode.connect(masterGain);
         await audioElement.play().catch(() => {});

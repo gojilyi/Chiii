@@ -253,6 +253,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                   </div>
                   <div className="text-[#C4C7C8] leading-relaxed">
                     يتم الآن دمج <strong>الصورة الثابتة</strong> + <strong>صوت الشيخ (شرح إيصال السالك)</strong> + <strong>المؤثرات (الموجات الصوتية، التعتيم، الفلتر)</strong> + <strong>النصوص وخط الريشة</strong> معاً في ملف فيديو حقيقي وليس مجرد صورة ثابتة.
+                    <div className="mt-1 text-emerald-300 font-medium">
+                      ⏱️ <strong>الفيديو حسب وقت الصوت تلقائياً:</strong> ينتهي الفيديو فور اكتمال صوت الشيخ بالضبط بدون أي زيادة أو شاشة سوداء.
+                    </div>
                   </div>
                 </div>
               </div>
