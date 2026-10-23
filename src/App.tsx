@@ -85,13 +85,13 @@ export default function App() {
             id: `uploaded_audio_${timestamp}`,
             title: customVideoName?.replace(/\.[^/.]+$/, '') || 'تسجيل صوتي',
             artist: 'ملف مرفوع من جهازك',
-            category: 'nasheed',
+            category: 'sheikh_recording',
             duration: 30,
             audioUrl: customVideoUrl,
             isCustomUpload: true,
             type: 'file',
           }
-        : DEFAULT_AUDIO_LIBRARY[0], // Recitation
+        : null,
       replacedAudioVolume: 0.9,
       replacedAudioStartTime: 0,
       textOverlays: [
@@ -143,13 +143,14 @@ export default function App() {
   const handleOpenAutoLessonInEditor = (bgUrl: string, title: string, words: any[], audioUrl?: string) => {
     const timestamp = Date.now();
     const joinedText = words.map((w: any) => w.word).join(' ');
+    const calculatedDuration = Math.max(10, Math.ceil(words.length * 0.9));
     const newDraft: ProjectDraft = {
       id: `draft_${timestamp}`,
       title: `درس تلقائي: ${title}`,
       aspectRatio: '9:16',
       createdAt: timestamp,
       updatedAt: timestamp,
-      duration: 16,
+      duration: calculatedDuration,
       videoSourceUrl: bgUrl,
       videoSourceName: `${title}.jpg`,
       isCustomVideo: true,
@@ -160,12 +161,12 @@ export default function App() {
             id: `custom_audio_${timestamp}`,
             title: title,
             artist: 'الشيخ العيد',
-            category: 'nasheed',
-            duration: 16,
+            category: 'sheikh_recording',
+            duration: calculatedDuration,
             audioUrl: audioUrl,
             isCustomUpload: true,
           }
-        : DEFAULT_AUDIO_LIBRARY[0],
+        : null,
       replacedAudioVolume: 0.9,
       replacedAudioStartTime: 0,
       textOverlays: [

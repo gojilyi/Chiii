@@ -174,12 +174,20 @@ export class StorageService {
       }
 
       const parsed: ProjectDraft[] = JSON.parse(data);
-      const cleaned = parsed.map((d) => ({
-        ...d,
-        videoSourceUrl: resolveStoredAssetUrl(d.videoSourceUrl),
-        thumbnailUrl: resolveStoredAssetUrl(d.thumbnailUrl),
-        particleOverlays: d.particleOverlays || DEFAULT_PARTICLE_OVERLAYS,
-      }));
+      const cleaned = parsed.map((d) => {
+        // Purge any fake audio tracks from existing stored drafts
+        let replacedAudio = d.replacedAudio;
+        if (replacedAudio && (!replacedAudio.isCustomUpload || replacedAudio.category !== 'sheikh_recording')) {
+          replacedAudio = null;
+        }
+        return {
+          ...d,
+          replacedAudio,
+          videoSourceUrl: resolveStoredAssetUrl(d.videoSourceUrl),
+          thumbnailUrl: resolveStoredAssetUrl(d.thumbnailUrl),
+          particleOverlays: d.particleOverlays || DEFAULT_PARTICLE_OVERLAYS,
+        };
+      });
 
       this._memoryCache = [...cleaned];
 
@@ -323,7 +331,7 @@ export class StorageService {
         videoSourceName: 'مشهد المئذنة الذهبي.mp4',
         muteOriginalAudio: true,
         originalAudioVolume: 0,
-        replacedAudio: DEFAULT_AUDIO_LIBRARY[0], // Recitation
+        replacedAudio: null,
         replacedAudioVolume: 0.95,
         replacedAudioStartTime: 0,
         textOverlays: [
@@ -352,7 +360,7 @@ export class StorageService {
         videoSourceName: 'مصحف المسجد العتيق.mp4',
         muteOriginalAudio: true,
         originalAudioVolume: 0,
-        replacedAudio: DEFAULT_AUDIO_LIBRARY[2], // Nasheed
+        replacedAudio: null,
         replacedAudioVolume: 0.8,
         replacedAudioStartTime: 0,
         textOverlays: [
@@ -388,7 +396,7 @@ export class StorageService {
         videoSourceName: 'مخطوطة_عتيقة_مع_شمعة.jpg',
         muteOriginalAudio: true,
         originalAudioVolume: 0,
-        replacedAudio: DEFAULT_AUDIO_LIBRARY[0],
+        replacedAudio: null,
         replacedAudioVolume: 0.95,
         replacedAudioStartTime: 0,
         textOverlays: [],

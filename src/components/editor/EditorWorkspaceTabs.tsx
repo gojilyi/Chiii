@@ -24,7 +24,8 @@ import {
   Layers,
   Sun,
   Activity,
-  Film
+  Film,
+  Clock
 } from 'lucide-react';
 import { 
   ProjectDraft, 
@@ -53,6 +54,8 @@ interface EditorWorkspaceTabsProps {
   onOpenCalligraphyModal: () => void;
   onOpenExportDialog: () => void;
   onOpenParticlesModal?: () => void;
+  onOpenAudioModal?: () => void;
+  onSyncDurationToAudio?: () => void;
 }
 
 export const EditorWorkspaceTabs: React.FC<EditorWorkspaceTabsProps> = ({
@@ -61,6 +64,8 @@ export const EditorWorkspaceTabs: React.FC<EditorWorkspaceTabsProps> = ({
   onOpenCalligraphyModal,
   onOpenExportDialog,
   onOpenParticlesModal,
+  onOpenAudioModal,
+  onSyncDurationToAudio,
 }) => {
   const [activeTab, setActiveTab] = useState<'text' | 'audio' | 'effects' | 'particles' | 'calligraphy' | 'ratio'>('text');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -356,45 +361,76 @@ export const EditorWorkspaceTabs: React.FC<EditorWorkspaceTabsProps> = ({
               </button>
             </div>
 
-            {/* Audio Track Library */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-[#E3E2E6] block">
-                اختر مساراً صوتياً هادفاً:
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {DEFAULT_AUDIO_LIBRARY.map((track) => {
-                  const isSelected = draft.replacedAudio?.id === track.id;
-                  return (
-                    <div
-                      key={track.id}
-                      onClick={() => handleSelectAudio(isSelected ? null : track)}
-                      className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                        isSelected
-                          ? 'bg-[#006C4C]/25 border-[#89F8C7]'
-                          : 'bg-[#121316] border-[#2B2C30] hover:border-[#3E4045]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 truncate">
-                        <span className="text-base">{isSelected ? '🔊' : '🎵'}</span>
-                        <div className="truncate">
-                          <span className="text-xs font-bold text-[#E3E2E6] block truncate">
-                            {track.title}
-                          </span>
-                          <span className="text-[10px] text-[#8E9192]">
-                            {track.artist} · {track.duration}ث
-                          </span>
-                        </div>
-                      </div>
-
-                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-md shrink-0 ${
-                        isSelected ? 'bg-[#006C4C] text-white' : 'bg-[#202226] text-[#8E9192]'
-                      }`}>
-                        {isSelected ? 'محدد' : 'اختيار'}
-                      </span>
-                    </div>
-                  );
-                })}
+            {/* Real Audio Recording & Upload Studio */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#E3E2E6] block">
+                  مسار صوت الشيخ (التسجيل الحقيقي):
+                </span>
+                {draft.replacedAudio && onSyncDurationToAudio && (
+                  <button
+                    onClick={onSyncDurationToAudio}
+                    className="text-[11px] text-[#89F8C7] hover:underline flex items-center gap-1 font-semibold"
+                  >
+                    <Clock className="w-3 h-3" />
+                    <span>مزامنة مدة الفيديو مع الصوت فوراً</span>
+                  </button>
+                )}
               </div>
+
+              {draft.replacedAudio ? (
+                <div className="p-4 rounded-xl bg-gradient-to-r from-[#006C4C]/25 to-[#121316] border border-[#006C4C] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5 truncate">
+                      <div className="w-9 h-9 rounded-lg bg-[#006C4C]/40 flex items-center justify-center text-[#89F8C7]">
+                        <Music className="w-5 h-5" />
+                      </div>
+                      <div className="truncate">
+                        <span className="text-xs font-bold text-[#89F8C7] block truncate">
+                          {draft.replacedAudio.title}
+                        </span>
+                        <span className="text-[10px] text-[#C4C7C8]">
+                          ⏱️ المدة: {draft.replacedAudio.duration} ثانية · تسجيل حقيقي
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {onOpenAudioModal && (
+                        <button
+                          onClick={onOpenAudioModal}
+                          className="px-3 py-1.5 rounded-lg bg-[#292A2E] hover:bg-[#333539] text-[#89F8C7] border border-[#36373B] text-xs font-semibold transition"
+                        >
+                          تغيير الصوت
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div 
+                  onClick={onOpenAudioModal}
+                  className="p-5 rounded-xl border border-dashed border-[#36373B] hover:border-[#89F8C7]/60 bg-[#121316] hover:bg-[#1A1C1E] flex flex-col items-center justify-center gap-2.5 cursor-pointer transition text-center"
+                >
+                  <div className="w-11 h-11 rounded-xl bg-[#006C4C]/20 border border-[#89F8C7]/30 flex items-center justify-center text-[#89F8C7]">
+                    <Upload className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-[#E3E2E6] block">
+                      رفع أو تسجيل صوت الشيخ (MP3 / M4A / WAV)
+                    </span>
+                    <span className="text-[11px] text-[#8E9192]">
+                      لا توجد أي أصوات وهمية؛ مدة الفيديو تتحدد تلقائياً حسب طول الصوت المرفوع
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="px-4 py-1.5 rounded-lg bg-[#006C4C] text-white text-xs font-bold shadow hover:bg-[#00573c] transition"
+                  >
+                    استعراض ورفع الصوت
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Volume sliders */}

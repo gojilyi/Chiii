@@ -59,6 +59,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
   // Copy states
   const [copiedCommand, setCopiedCommand] = useState(false);
   const [copiedDart, setCopiedDart] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
@@ -118,10 +119,11 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     setIsExporting(true);
     setExportProgress(0);
     setIsDone(false);
+    setExportError(null);
     setFfmpegLogs([]);
 
     const initialLogs = [
-      `[ffmpeg] ffmpeg version 6.0.3-static with libx264, aac, MediaRecorder canvas pipeline`,
+      `[ffmpeg] Initializing video pipeline with libx264, aac, yuv420p`,
       `[ffmpeg] Input #0 (image/video): '${draft.videoSourceName || 'image_or_video.jpg'}'`,
       `[ffmpeg] Input #1 (audio): '${draft.replacedAudio?.title || 'صوت_الشيخ_العيد.mp3'}'`,
       `[ffmpeg] FilterGraph: scale=${getResolutionDimensions().replace(/\s+/g, '')}, loop=1, framerate=${selectedFps}, pix_fmt=yuv420p`,
@@ -148,23 +150,22 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       setGeneratedSizeMb((result.sizeBytes / (1024 * 1024)).toFixed(2));
       setIsDone(true);
       setIsExporting(false);
+      setExportError(null);
       setCurrentStageText('اكتمل إنتاج الفيديو بنجاح!');
     } catch (err: any) {
       console.error('Video export error:', err);
-      // Fallback in case of environment limitation
+      const errMsg = err?.message || 'تعذر استخراج الفيديو';
       setFfmpegLogs((prev) => [
         ...prev,
-        `[error] Browser direct recording notice: ${err?.message || 'Context adjustment'}`,
-        `[ffmpeg] Generating direct video package...`
+        `[error] فشل التصدير: ${errMsg}`,
+        `[hint] يرجى التأكد من اختيار ملف صوتي صالح والضغط على إعادة المحاولة`
       ]);
 
-      const downloadUrl = draft.videoSourceUrl || draft.replacedAudio?.audioUrl || '';
-      setGeneratedBlobUrl(downloadUrl);
-      setGeneratedFilename(ffmpegData.outputFilename);
-      setGeneratedSizeMb('8.4');
-      setIsDone(true);
+      setGeneratedBlobUrl(null);
+      setExportError(errMsg);
+      setIsDone(false);
       setIsExporting(false);
-      setCurrentStageText('اكتمل تجهيز الملف للتنزيل.');
+      setCurrentStageText(`فشلت المعالجة: ${errMsg}`);
     }
   };
 
@@ -359,7 +360,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                       <span>معالجة ورندرة الفيديو الشامل (صوت + صورة + مؤثرات)</span>
                     </h4>
                     <p className="text-xs text-[#8E9192] mt-0.5">
-                      الأبعاد: {getResolutionDimensions()} ({draft.aspectRatio}) · المدة: {draft.duration || 15} ثانية
+                      الأبعاد: {getResolutionDimensions()} ({draft.aspectRatio}) · المدة: {draft.replacedAudio ? `${(draft.replacedAudio.trimEnd && draft.replacedAudio.trimStart !== undefined && draft.replacedAudio.trimEnd > draft.replacedAudio.trimStart ? (draft.replacedAudio.trimEnd - draft.replacedAudio.trimStart) : (draft.replacedAudio.duration || draft.duration || 15)).toFixed(1)} ثانية (مطابقة لطول الصوت)` : `${draft.duration || 15} ثانية`}
                     </p>
                   </div>
 

@@ -40,44 +40,33 @@ class AudioEngine {
   }
 
   playReplacedTrack(
-    preset: string = 'spiritual_drone',
+    _preset?: string,
     volume: number = 0.8,
     customUrl?: string,
     startTime: number = 0,
-    ambientPreset: string = 'spiritual_drone',
-    ambientVolume: number = 0.35
+    _ambientPreset?: string,
+    _ambientVolume?: number
   ) {
     this.initContext();
     this.currentVolume = volume;
 
-    // If user provided a custom audio URL (uploaded MP3 / live recorded audio file)
+    // Only play if a genuine custom audio URL (uploaded MP3 / live recorded audio file) is provided
     if (customUrl) {
-      this.playCustomAudio(customUrl, volume, startTime, ambientPreset, ambientVolume);
+      this.playCustomAudio(customUrl, volume, startTime);
       return;
     }
 
-    // Stop custom audio if switching to preset
+    // Stop and stay silent - absolutely NO synthetic oscillator chords or fake sounds
     this.stopCustomAudio();
-    if (preset !== 'none' && preset !== 'silence') {
-      this.playSynthesizedPreset(preset, volume);
-    } else {
-      this.stopOscillators();
-    }
+    this.stopOscillators();
   }
 
   private playCustomAudio(
     url: string,
     volume: number,
-    startTime: number = 0,
-    ambientPreset: string = 'spiritual_drone',
-    ambientVolume: number = 0.35
+    startTime: number = 0
   ) {
-    // If an ambient sound effect is selected alongside custom audio, start its subtle harmonic accompaniment
-    if (ambientPreset && ambientPreset !== 'none' && ambientPreset !== 'silence' && ambientVolume > 0) {
-      this.playSynthesizedPreset(ambientPreset, ambientVolume);
-    } else {
-      this.stopOscillators();
-    }
+    this.stopOscillators();
 
     if (!this.customAudioElement) {
       this.customAudioElement = new Audio();
@@ -115,12 +104,10 @@ class AudioEngine {
 
     this.isPlaying = true;
 
-    // Setup error fallback
+    // Setup error callback - strictly no synthetic fallback
     audio.onerror = (e) => {
-      console.warn('Custom audio element error on url:', url, e, '- falling back to synth');
-      if (this.isPlaying) {
-        this.playSynthesizedPreset(ambientPreset || 'spiritual_drone', volume);
-      }
+      console.warn('Custom audio element error on url:', url, e);
+      this.isPlaying = false;
     };
 
     const playPromise = audio.play();
@@ -204,54 +191,9 @@ class AudioEngine {
     });
   }
 
-  private playSynthesizedPreset(preset: string, volume: number) {
+  private playSynthesizedPreset(_preset?: string, _volume?: number) {
+    // Pure silence - absolutely NO synthetic oscillators or fake chords
     this.stopOscillators();
-    if (!this.ctx || !this.replacedGain) return;
-
-    this.isPlaying = true;
-    this.replacedGain.gain.setValueAtTime(volume * 0.4, this.ctx.currentTime);
-
-    // Peaceful synthesized spiritual soundscape (pure Web Audio chords / drone)
-    // Scale: Peaceful D minor / Bayati spiritual aura (D3, A3, F3, E3, D4)
-    const baseFreqs =
-      preset === 'gentle_reverb'
-        ? [110.0, 164.81, 220.0, 329.63] // Deep mosque hall acoustic resonance
-        : preset === 'water_courtyard'
-        ? [130.81, 196.0, 261.63, 392.0] // Courtyard fountain tranquil harmonics
-        : preset === 'voice_clarity'
-        ? [174.61, 261.63, 349.23, 440.0] // Warm human speech enhancer frequencies
-        : preset === 'adhan_harmony'
-        ? [146.83, 220.0, 261.63, 293.66]
-        : preset === 'choral_peace'
-        ? [130.81, 196.0, 261.63, 329.63]
-        : [146.83, 220.0, 174.61, 293.66]; // Bayati serenity drone
-
-    baseFreqs.forEach((freq, idx) => {
-      if (!this.ctx || !this.replacedGain) return;
-      const osc = this.ctx.createOscillator();
-      const oscGain = this.ctx.createGain();
-
-      // Soft sine wave for meditative/spiritual warmth
-      osc.type = idx % 2 === 0 ? 'sine' : 'triangle';
-      osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-
-      // Gentle subtle vibrato/breathing effect
-      const lfo = this.ctx.createOscillator();
-      const lfoGain = this.ctx.createGain();
-      lfo.frequency.setValueAtTime(0.2 + idx * 0.1, this.ctx.currentTime);
-      lfoGain.gain.setValueAtTime(1.5, this.ctx.currentTime);
-      lfo.connect(osc.frequency);
-      lfo.start();
-
-      oscGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
-      oscGain.gain.exponentialRampToValueAtTime(0.12 / baseFreqs.length, this.ctx.currentTime + 1.2);
-
-      osc.connect(oscGain);
-      oscGain.connect(this.replacedGain);
-      osc.start();
-
-      this.activeOscillators.push(osc, lfo);
-    });
   }
 
   seek(timeInSeconds: number) {

@@ -32,7 +32,8 @@ import {
   CheckCircle2,
   Activity,
   Square,
-  Waves
+  Waves,
+  Clock
 } from 'lucide-react';
 import { 
   READY_BACKGROUNDS, 
@@ -72,7 +73,7 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
   const [activeVisualEffect, setActiveVisualEffect] = useState<string>(initialLesson.defaultVisualEffect || 'spiritual_glow');
   
   // Audio & Ambient Effects State (مؤثر الصوت)
-  const [ambientAudioEffect, setAmbientAudioEffect] = useState<string>(initialLesson.defaultAudioEffect || 'spiritual_drone');
+  const [ambientAudioEffect, setAmbientAudioEffect] = useState<string>('none');
   const [ambientVolume, setAmbientVolume] = useState<number>(0.35);
   const [sheikhVolume, setSheikhVolume] = useState<number>(1.0);
 
@@ -167,7 +168,7 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
   };
 
   // Upload Sheikh Audio File
-  const handleCustomAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCustomAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const blobUrl = URL.createObjectURL(file);
@@ -195,23 +196,39 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
           durationSec: audioDur,
           text: customText,
           words: generatedWords,
-          defaultAudioEffect: ambientAudioEffect,
+          defaultAudioEffect: 'none',
           defaultVisualEffect: activeVisualEffect,
-          effectLabel: 'تسجيل مخصص',
+          effectLabel: 'تسجيل حي للشيخ',
         });
         setCurrentTime(0);
         setIsPlaying(true);
       };
 
+      // Accurate duration decode using Web Audio API (works for all audio files)
+      try {
+        const ab = await file.arrayBuffer();
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        const ctx = new AudioCtx();
+        const buf = await ctx.decodeAudioData(ab);
+        const dur = Math.round(buf.duration);
+        ctx.close().catch(() => {});
+        if (dur > 0) {
+          processAudio(dur, blobUrl);
+          if (e.target) e.target.value = '';
+          return;
+        }
+      } catch (err) {
+        console.warn('AudioContext decode fallback:', err);
+      }
+
       const tempAudio = new Audio();
       tempAudio.src = blobUrl;
       tempAudio.onloadedmetadata = () => {
-        const audioDur = Math.round(tempAudio.duration) || 16;
+        const audioDur = Math.round(tempAudio.duration) || 30;
         processAudio(audioDur, blobUrl);
       };
-
       tempAudio.onerror = () => {
-        processAudio(16, blobUrl);
+        processAudio(30, blobUrl);
       };
     }
     if (e.target) {
@@ -599,10 +616,11 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
   -c:a aac -b:a 192k -shortest -pix_fmt yuv420p output_auto_lesson.mp4`;
 
   // Real in-browser video generator (MediaRecorder stream to video)
-  const handleStartExport = () => {
+  const handleStartExport = async () => {
     setIsExporting(true);
-    setExportProgress(0);
+    setExportProgress(10);
     setIsExportDone(false);
+    setExportedVideoUrl(null);
 
     const canvas = canvasRef.current;
     if (!canvas) {
@@ -611,8 +629,95 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
     }
 
     try {
+      // 1. Try Native Server-Side FFmpeg Render (100% genuine H.264 / AAC MP4 file)
+      const canvasDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      let audioData: string | undefined = undefined;
+
+      if (customAudioUrl) {
+        if (customAudioUrl.startsWith('data:audio/')) {
+          audioData = customAudioUrl;
+        } else {
+          try {
+            const resp = await fetch(customAudioUrl);
+            const blob = await resp.blob();
+            audioData = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(blob);
+            });
+          } catch {}
+        }
+      }
+
+      setExportProgress(35);
+
+      const res = await fetch('/api/render-ffmpeg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: canvasDataUrl,
+          audio: audioData,
+          width: canvas.width,
+          height: canvas.height,
+          fps: 30,
+          filename: `درس_الشيخ_العيد_${selectedLesson.title.replace(/\s+/g, '_')}.mp4`,
+        }),
+      });
+
+      if (res.ok) {
+        setExportProgress(90);
+        const videoBlob = await res.blob();
+        if (videoBlob.size > 1000) {
+          const videoUrl = URL.createObjectURL(videoBlob);
+          setExportedVideoUrl(videoUrl);
+          setExportProgress(100);
+          setIsExporting(false);
+          setIsExportDone(true);
+          return;
+        }
+      }
+    } catch (serverErr) {
+      console.warn('Server FFmpeg render fallback to client MediaRecorder:', serverErr);
+    }
+
+    // 2. Client-Side Fallback via Canvas Stream & MediaRecorder
+    try {
+      setExportProgress(40);
       const stream = canvas.captureStream(30);
-      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+
+      // Mix custom audio if present
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      const dest = audioCtx.createMediaStreamDestination();
+
+      if (customAudioUrl) {
+        try {
+          const resp = await fetch(customAudioUrl);
+          const buf = await resp.arrayBuffer();
+          const audioBuffer = await audioCtx.decodeAudioData(buf);
+          const srcNode = audioCtx.createBufferSource();
+          srcNode.buffer = audioBuffer;
+          srcNode.connect(dest);
+          srcNode.start(0);
+        } catch {}
+      }
+
+      const audioTracks = dest.stream.getAudioTracks();
+      const combinedTracks = [
+        ...stream.getVideoTracks(),
+        ...(audioTracks.length > 0 ? audioTracks : []),
+      ];
+      const combinedStream = new MediaStream(combinedTracks);
+
+      let chosenMime = 'video/webm';
+      if (typeof MediaRecorder !== 'undefined') {
+        if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')) chosenMime = 'video/mp4;codecs=avc1,mp4a.40.2';
+        else if (MediaRecorder.isTypeSupported('video/mp4')) chosenMime = 'video/mp4';
+        else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) chosenMime = 'video/webm;codecs=vp9,opus';
+        else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) chosenMime = 'video/webm;codecs=vp8,opus';
+      }
+
+      const recorder = new MediaRecorder(combinedStream, { mimeType: chosenMime });
       const chunks: Blob[] = [];
 
       recorder.ondataavailable = (e) => {
@@ -620,37 +725,31 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
       };
 
       recorder.onstop = () => {
-        const videoBlob = new Blob(chunks, { type: 'video/webm' });
+        const videoBlob = new Blob(chunks, { type: recorder.mimeType || chosenMime });
         const videoUrl = URL.createObjectURL(videoBlob);
         setExportedVideoUrl(videoUrl);
         setIsExporting(false);
         setIsExportDone(true);
+        audioCtx.close().catch(() => {});
       };
 
-      recorder.start();
+      recorder.start(100);
 
-      let p = 0;
-      const interval = setInterval(() => {
-        p += 10;
-        if (p >= 100) {
-          p = 100;
-          clearInterval(interval);
+      const totalMs = customDuration * 1000;
+      const startMs = Date.now();
+      const timer = setInterval(() => {
+        const elapsed = Date.now() - startMs;
+        const pct = Math.min(95, Math.round(40 + (elapsed / totalMs) * 55));
+        setExportProgress(pct);
+        if (elapsed >= totalMs) {
+          clearInterval(timer);
           recorder.stop();
         }
-        setExportProgress(p);
-      }, 250);
-    } catch {
-      let p = 0;
-      const interval = setInterval(() => {
-        p += 15;
-        if (p >= 100) {
-          p = 100;
-          clearInterval(interval);
-          setIsExporting(false);
-          setIsExportDone(true);
-        }
-        setExportProgress(p);
       }, 200);
+    } catch (err: any) {
+      console.error('Export failed:', err);
+      setIsExporting(false);
+      setIsExportDone(false);
     }
   };
 
@@ -835,19 +934,31 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
               </div>
             )}
 
-            {isExportDone && (
-              <div className="p-3.5 bg-[#006C4C]/30 border border-[#89F8C7]/40 rounded-xl flex items-center justify-between">
-                <span className="text-xs text-[#89F8C7] font-bold flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>اكتمل تحويل الدرس إلى فيديو بنجاح!</span>
-                </span>
-                <a
-                  href={exportedVideoUrl || selectedBg.imageUrl}
-                  download="sheikh_eid_iysal_salik_lesson.mp4"
-                  className="px-3 py-1.5 rounded-lg bg-[#89F8C7] text-[#002114] text-xs font-bold hover:bg-white transition-colors"
-                >
-                  تنزيل الفيديو (MP4)
-                </a>
+            {isExportDone && exportedVideoUrl && (
+              <div className="p-4 bg-[#006C4C]/25 border border-[#89F8C7]/40 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-[#89F8C7] font-bold flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>اكتمل إنتاج الفيديو بنجاح (MP4)!</span>
+                  </span>
+                  <a
+                    href={exportedVideoUrl}
+                    download={`درس_الشيخ_العيد_${selectedLesson.title.replace(/\s+/g, '_')}.mp4`}
+                    className="px-4 py-2 rounded-xl bg-[#89F8C7] text-[#002114] text-xs font-bold hover:bg-white transition-colors shadow-md flex items-center gap-1.5 active:scale-95"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>تنزيل الفيديو الآن</span>
+                  </a>
+                </div>
+                <div className="rounded-xl overflow-hidden border border-[#2B2C30] bg-black">
+                  <video
+                    src={exportedVideoUrl}
+                    controls
+                    autoPlay
+                    playsInline
+                    className="w-full max-h-48 object-contain bg-black mx-auto"
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -1133,7 +1244,7 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
                 <input
                   ref={audioInputRef}
                   type="file"
-                  accept="audio/*"
+                  accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg,.opus,.flac,.amr,audio/mpeg,audio/wav,audio/x-m4a,audio/aac"
                   className="hidden"
                   onChange={handleCustomAudioUpload}
                 />
@@ -1207,24 +1318,20 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
                   <span className="text-[10px] text-[#8E9192]">يتم تقسيم الكلمات وتوزيع توقيتها تلقائياً</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
                   <input
                     type="text"
                     value={customLessonTitle}
                     onChange={(e) => setCustomLessonTitle(e.target.value)}
                     placeholder="عنوان درس إيصال السالك"
-                    className="w-full bg-[#1A1C1E] border border-[#2B2C30] rounded-lg p-2 text-xs text-[#E3E2E6] outline-none"
+                    className="flex-1 bg-[#1A1C1E] border border-[#2B2C30] rounded-lg p-2 text-xs text-[#E3E2E6] outline-none"
                   />
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-[#8E9192] whitespace-nowrap">المدة (ثوانٍ):</span>
-                    <input
-                      type="number"
-                      min="5"
-                      max="180"
-                      value={customDuration}
-                      onChange={(e) => setCustomDuration(Math.max(5, parseInt(e.target.value) || 16))}
-                      className="w-20 bg-[#1A1C1E] border border-[#2B2C30] rounded-lg p-2 text-xs text-[#89F8C7] font-mono outline-none"
-                    />
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[#1A1C1E] border border-[#2B2C30] rounded-lg text-xs shrink-0">
+                    <Clock className="w-3.5 h-3.5 text-[#89F8C7]" />
+                    <span className="text-[#8E9192]">مدة الفيديو:</span>
+                    <span className="text-[#89F8C7] font-mono font-bold">
+                      {customDuration} ثانية (تحدد تلقائياً حسب الصوت)
+                    </span>
                   </div>
                 </div>
 

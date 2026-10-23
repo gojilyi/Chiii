@@ -478,6 +478,8 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
         onOpenCalligraphyModal={() => setIsCalligraphyModalOpen(true)}
         onOpenExportDialog={() => setIsExportDialogOpen(true)}
         onOpenParticlesModal={() => setIsParticlesModalOpen(true)}
+        onOpenAudioModal={() => setIsAudioModalOpen(true)}
+        onSyncDurationToAudio={() => handleSyncDurationToAudio()}
       />
 
       {/* Middle Interactive Timeline */}
