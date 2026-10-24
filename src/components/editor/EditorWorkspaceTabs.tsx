@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Type, 
   Volume2, 
@@ -25,7 +25,14 @@ import {
   Sun,
   Activity,
   Film,
-  Clock
+  Clock,
+  Image as ImageIcon,
+  Eye,
+  ZoomIn,
+  Palette,
+  FlipHorizontal,
+  BookOpen,
+  RotateCcw
 } from 'lucide-react';
 import { 
   ProjectDraft, 
@@ -33,7 +40,8 @@ import {
   SpiritualEffect, 
   AudioTrackConfig, 
   AspectRatioType,
-  ParticleOverlayItem
+  ParticleOverlayItem,
+  BackgroundAdjustments
 } from '../../types';
 import { 
   QURANIC_VERSE_PRESETS, 
@@ -43,9 +51,11 @@ import {
   ASSET_MINARET_SUNSET,
   ASSET_QURAN_LIGHT,
   ASSET_ARABIC_ORNAMENT,
-  DEFAULT_PARTICLE_OVERLAYS
+  DEFAULT_PARTICLE_OVERLAYS,
+  DEFAULT_BACKGROUND_ADJUSTMENTS
 } from '../../constants/defaults';
 import { ASSET_ANTIQUE_PARCHMENT, SAMPLE_TIMED_SPEECHES } from '../../constants/calligraphyDefaults';
+import { READY_BACKGROUNDS } from '../../constants/autoLectureDefaults';
 import { audioEngine } from '../../services/audioEngine';
 
 interface EditorWorkspaceTabsProps {
@@ -56,7 +66,9 @@ interface EditorWorkspaceTabsProps {
   onOpenParticlesModal?: () => void;
   onOpenAudioModal?: () => void;
   onSyncDurationToAudio?: () => void;
+  onOpenBackgroundModal?: () => void;
 }
+
 
 export const EditorWorkspaceTabs: React.FC<EditorWorkspaceTabsProps> = ({
   draft,
@@ -66,14 +78,48 @@ export const EditorWorkspaceTabs: React.FC<EditorWorkspaceTabsProps> = ({
   onOpenParticlesModal,
   onOpenAudioModal,
   onSyncDurationToAudio,
+  onOpenBackgroundModal,
 }) => {
   const [activeTab, setActiveTab] = useState<'text' | 'audio' | 'effects' | 'particles' | 'calligraphy' | 'ratio'>('text');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const bgUploadRef = useRef<HTMLInputElement>(null);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 2500);
   };
+
+  const currentAdjustments: BackgroundAdjustments = draft.backgroundAdjustments || { ...DEFAULT_BACKGROUND_ADJUSTMENTS };
+
+  const handleUpdateAdjustments = (updates: Partial<BackgroundAdjustments>) => {
+    const updatedAdj: BackgroundAdjustments = {
+      ...currentAdjustments,
+      ...updates,
+    };
+    onUpdateDraft({
+      ...draft,
+      backgroundAdjustments: updatedAdj,
+    });
+  };
+
+  const handleCustomBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const resultUrl = event.target?.result as string;
+        onUpdateDraft({
+          ...draft,
+          videoSourceUrl: resultUrl,
+          videoSourceName: file.name,
+          thumbnailUrl: resultUrl,
+        });
+        showToast(`تم تعيين خلفية مخصصة: ${file.name}`);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
 
   // 1. Text Overlay quick edit
   const activeOverlay = draft.textOverlays[0] || {
@@ -239,10 +285,11 @@ export const EditorWorkspaceTabs: React.FC<EditorWorkspaceTabsProps> = ({
               : 'text-[#8E9192] hover:text-[#E3E2E6] hover:bg-[#202226]'
           }`}
         >
-          <Layers className="w-4 h-4 text-[#89F8C7]" />
-          <span>المقاس والخلفية</span>
+          <ImageIcon className="w-4 h-4 text-[#89F8C7]" />
+          <span>الخلفيات والتعديل عليها</span>
         </button>
       </div>
+
 
       {/* Tab Panels */}
       <div className="p-4 sm:p-5">
@@ -603,86 +650,299 @@ export const EditorWorkspaceTabs: React.FC<EditorWorkspaceTabsProps> = ({
           </div>
         )}
 
-        {/* ================= TAB 5: ASPECT RATIO & BACKGROUND ================= */}
+        {/* ================= TAB 5: BACKGROUNDS & ADJUSTMENTS STUDIO ================= */}
         {activeTab === 'ratio' && (
-          <div className="space-y-4">
+          <div className="space-y-6">
             
-            {/* Aspect Ratio Switcher */}
-            <div>
-              <span className="text-xs font-bold text-[#E3E2E6] block mb-2">
-                اختر مقاس الفيديو المطلوب:
-              </span>
-              <div className="grid grid-cols-3 gap-3">
-                <button
-                  onClick={() => handleSwitchRatio('9:16')}
-                  className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all ${
-                    draft.aspectRatio === '9:16'
-                      ? 'bg-[#006C4C] border-[#89F8C7] text-white font-bold'
-                      : 'bg-[#121316] border-[#2B2C30] text-[#8E9192]'
-                  }`}
-                >
-                  <Smartphone className="w-5 h-5" />
-                  <span className="text-xs">9:16 (ريلز وقصص)</span>
-                </button>
+            {/* Top Toolbar: Ratio Switcher + Upload + Full Modal */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-[#141517] border border-[#2B2C30]">
+              <div>
+                <span className="text-xs font-bold text-[#E3E2E6] block">
+                  مقاس الفيديو الحالي:
+                </span>
+                <span className="text-[11px] text-[#8E9192]">
+                  حدد أبعاد الكادر المناسبة للمنصة المطلوبة
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 bg-[#1A1C1E] p-1 rounded-xl border border-[#2B2C30]">
+                  {(['9:16', '16:9', '1:1'] as AspectRatioType[]).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => handleSwitchRatio(r)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                        draft.aspectRatio === r
+                          ? 'bg-[#006C4C] text-white shadow-sm'
+                          : 'text-[#8E9192] hover:text-white'
+                      }`}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
 
                 <button
-                  onClick={() => handleSwitchRatio('16:9')}
-                  className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all ${
-                    draft.aspectRatio === '16:9'
-                      ? 'bg-[#006C4C] border-[#89F8C7] text-white font-bold'
-                      : 'bg-[#121316] border-[#2B2C30] text-[#8E9192]'
-                  }`}
+                  onClick={() => bgUploadRef.current?.click()}
+                  className="px-3 py-1.5 rounded-xl bg-[#202226] hover:bg-[#292A2E] text-[#89F8C7] border border-[#36373B] text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
                 >
-                  <Monitor className="w-5 h-5" />
-                  <span className="text-xs">16:9 (يوتيوب)</span>
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>رفع صورة خلفية</span>
                 </button>
+                <input
+                  ref={bgUploadRef}
+                  type="file"
+                  accept="image/*,video/*"
+                  className="hidden"
+                  onChange={handleCustomBgUpload}
+                />
 
-                <button
-                  onClick={() => handleSwitchRatio('1:1')}
-                  className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all ${
-                    draft.aspectRatio === '1:1'
-                      ? 'bg-[#006C4C] border-[#89F8C7] text-white font-bold'
-                      : 'bg-[#121316] border-[#2B2C30] text-[#8E9192]'
-                  }`}
-                >
-                  <Square className="w-5 h-5" />
-                  <span className="text-xs">1:1 (مربع)</span>
-                </button>
+                {onOpenBackgroundModal && (
+                  <button
+                    onClick={onOpenBackgroundModal}
+                    className="px-3 py-1.5 rounded-xl bg-[#006C4C] hover:bg-[#00573c] text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                  >
+                    <Sliders className="w-3.5 h-3.5" />
+                    <span>نافذة التعديل المتقدم</span>
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Background Image / Scene Selector */}
-            <div className="space-y-2 pt-2">
-              <span className="text-xs font-bold text-[#E3E2E6] block">
-                اختر مشهد أو خلفية الفيديو:
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  { name: 'مشهد المئذنة الذهبي', url: ASSET_MINARET_SUNSET },
-                  { name: 'مصحف المسجد العتيق', url: ASSET_QURAN_LIGHT },
-                  { name: 'المخطوطة والشمعة', url: ASSET_ANTIQUE_PARCHMENT },
-                  { name: 'زخرفة إسلامية ذهبية', url: ASSET_ARABIC_ORNAMENT },
-                ].map((bg, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => handleSwitchBackground(bg.url, bg.name + '.mp4')}
-                    className={`rounded-xl border overflow-hidden cursor-pointer transition-all ${
-                      draft.videoSourceUrl === bg.url
-                        ? 'border-[#89F8C7] ring-2 ring-[#006C4C]'
-                        : 'border-[#2B2C30] hover:border-[#46484C]'
+            {/* Background Gallery Grid */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#E3E2E6] block">
+                  اختر مشهد الخلفية للشيخ (سلسلة إيصال السالك والمساجد):
+                </span>
+                <span className="text-[11px] text-[#89F8C7]">
+                  {READY_BACKGROUNDS.length} مشاهد متوفرة
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5">
+                {READY_BACKGROUNDS.map((bg) => {
+                  const isSelected = draft.videoSourceUrl === bg.imageUrl;
+                  return (
+                    <div
+                      key={bg.id}
+                      onClick={() => handleSwitchBackground(bg.imageUrl, bg.name + '.jpg')}
+                      className={`rounded-xl border overflow-hidden cursor-pointer transition-all relative group ${
+                        isSelected
+                          ? 'border-[#89F8C7] ring-2 ring-[#006C4C] shadow-md'
+                          : 'border-[#2B2C30] hover:border-[#46484C] bg-[#121316]'
+                      }`}
+                    >
+                      <div className="h-20 bg-black overflow-hidden relative">
+                        <img
+                          src={bg.imageUrl}
+                          alt={bg.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                        />
+                        {isSelected && (
+                          <div className="absolute top-1.5 left-1.5 bg-[#006C4C] text-white w-5 h-5 rounded-full flex items-center justify-center">
+                            <Check className="w-3 h-3" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-1.5 bg-[#141517] text-center">
+                        <span className="text-[10px] font-bold text-[#E3E2E6] block truncate" title={bg.name}>
+                          {bg.name}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Live Sliders: Brightness, Contrast, Blur, Vignette, Zoom, Pan */}
+            <div className="p-4 rounded-2xl bg-[#141517] border border-[#2B2C30] space-y-4">
+              <div className="flex items-center justify-between border-b border-[#2B2C30] pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-[#FFDF9E]" />
+                  <span className="text-xs font-bold text-[#E3E2E6]">
+                    أدوات التعديل على مظهر وإضاءة الخلفية الحالية:
+                  </span>
+                </div>
+                <button
+                  onClick={() => onUpdateDraft({ ...draft, backgroundAdjustments: { ...DEFAULT_BACKGROUND_ADJUSTMENTS } })}
+                  className="text-[11px] text-[#8E9192] hover:text-white flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>إعادة ضبط التعديلات</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Brightness */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-[#C4C7C8]">
+                    <span className="flex items-center gap-1">
+                      <Sun className="w-3.5 h-3.5 text-amber-400" />
+                      <span>السطوع:</span>
+                    </span>
+                    <span className="font-mono text-[#89F8C7]">{currentAdjustments.brightness}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="50"
+                    max="150"
+                    value={currentAdjustments.brightness}
+                    onChange={(e) => handleUpdateAdjustments({ brightness: parseInt(e.target.value) })}
+                    className="w-full accent-[#89F8C7] h-1.5 bg-[#2B2C30] rounded-lg"
+                  />
+                </div>
+
+                {/* Contrast */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-[#C4C7C8]">
+                    <span>التباين (Contrast):</span>
+                    <span className="font-mono text-[#89F8C7]">{currentAdjustments.contrast}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="50"
+                    max="150"
+                    value={currentAdjustments.contrast}
+                    onChange={(e) => handleUpdateAdjustments({ contrast: parseInt(e.target.value) })}
+                    className="w-full accent-[#89F8C7] h-1.5 bg-[#2B2C30] rounded-lg"
+                  />
+                </div>
+
+                {/* Blur */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-[#C4C7C8]">
+                    <span className="flex items-center gap-1">
+                      <Eye className="w-3.5 h-3.5 text-[#89F8C7]" />
+                      <span>عزل الخلفية (Blur):</span>
+                    </span>
+                    <span className="font-mono text-[#89F8C7]">{currentAdjustments.blur}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="20"
+                    value={currentAdjustments.blur}
+                    onChange={(e) => handleUpdateAdjustments({ blur: parseInt(e.target.value) })}
+                    className="w-full accent-[#89F8C7] h-1.5 bg-[#2B2C30] rounded-lg"
+                  />
+                </div>
+
+                {/* Vignette */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-[#C4C7C8]">
+                    <span>تعتيم الحواف (Vignette):</span>
+                    <span className="font-mono text-[#89F8C7]">{currentAdjustments.vignette}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={currentAdjustments.vignette}
+                    onChange={(e) => handleUpdateAdjustments({ vignette: parseInt(e.target.value) })}
+                    className="w-full accent-[#89F8C7] h-1.5 bg-[#2B2C30] rounded-lg"
+                  />
+                </div>
+
+                {/* Zoom / Scale */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-[#C4C7C8]">
+                    <span className="flex items-center gap-1">
+                      <ZoomIn className="w-3.5 h-3.5 text-[#FFDF9E]" />
+                      <span>تقريب الكادر (Zoom):</span>
+                    </span>
+                    <span className="font-mono text-[#89F8C7]">{currentAdjustments.scale.toFixed(2)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="2.5"
+                    step="0.05"
+                    value={currentAdjustments.scale}
+                    onChange={(e) => handleUpdateAdjustments({ scale: parseFloat(e.target.value) })}
+                    className="w-full accent-[#89F8C7] h-1.5 bg-[#2B2C30] rounded-lg"
+                  />
+                </div>
+
+                {/* Flip Horizontal */}
+                <div className="flex items-end pb-1">
+                  <button
+                    onClick={() => handleUpdateAdjustments({ flipHorizontal: !currentAdjustments.flipHorizontal })}
+                    className={`w-full py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition ${
+                      currentAdjustments.flipHorizontal
+                        ? 'bg-[#006C4C] border-[#89F8C7] text-white shadow-sm'
+                        : 'bg-[#202226] border-[#2B2C30] text-[#8E9192] hover:text-white'
                     }`}
                   >
-                    <img src={bg.url} alt={bg.name} className="w-full h-24 object-cover" />
-                    <div className="p-2 text-center text-[11px] font-semibold text-[#E3E2E6] bg-[#121316]">
-                      {bg.name}
-                    </div>
-                  </div>
-                ))}
+                    <FlipHorizontal className="w-4 h-4" />
+                    <span>{currentAdjustments.flipHorizontal ? 'معكوسة أفقياً (مفعّل)' : 'عكس اتجاه الصورة (مرآة)'}</span>
+                  </button>
+                </div>
               </div>
+
+              {/* Overlays Quick Toggles (Arch, Banner, Book) */}
+              <div className="pt-3 border-t border-[#2B2C30] grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Arch frame */}
+                <button
+                  onClick={() => handleUpdateAdjustments({ showGoldArchFrame: !currentAdjustments.showGoldArchFrame })}
+                  className={`p-3 rounded-xl border flex items-center justify-between text-xs font-bold transition ${
+                    currentAdjustments.showGoldArchFrame
+                      ? 'bg-amber-950/40 border-amber-500/60 text-amber-300'
+                      : 'bg-[#202226] border-[#2B2C30] text-[#8E9192] hover:text-white'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>الإطار والقوس المذهب</span>
+                  </span>
+                  <span>{currentAdjustments.showGoldArchFrame ? 'مفعّل' : 'معطل'}</span>
+                </button>
+
+                {/* Banner overlay */}
+                <button
+                  onClick={() => {
+                    const prev = currentAdjustments.bannerOverlay || DEFAULT_BACKGROUND_ADJUSTMENTS.bannerOverlay;
+                    handleUpdateAdjustments({ bannerOverlay: { ...prev, enabled: !prev.enabled } });
+                  }}
+                  className={`p-3 rounded-xl border flex items-center justify-between text-xs font-bold transition ${
+                    currentAdjustments.bannerOverlay?.enabled
+                      ? 'bg-[#006C4C]/40 border-[#89F8C7]/60 text-[#89F8C7]'
+                      : 'bg-[#202226] border-[#2B2C30] text-[#8E9192] hover:text-white'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-[#89F8C7]" />
+                    <span>بانر «شرح كتاب إيصال السالك»</span>
+                  </span>
+                  <span>{currentAdjustments.bannerOverlay?.enabled ? 'مفعّل' : 'معطل'}</span>
+                </button>
+
+                {/* Book overlay */}
+                <button
+                  onClick={() => {
+                    const prev = currentAdjustments.bookGraphicOverlay || DEFAULT_BACKGROUND_ADJUSTMENTS.bookGraphicOverlay;
+                    handleUpdateAdjustments({ bookGraphicOverlay: { ...prev, enabled: !prev.enabled } });
+                  }}
+                  className={`p-3 rounded-xl border flex items-center justify-between text-xs font-bold transition ${
+                    currentAdjustments.bookGraphicOverlay?.enabled
+                      ? 'bg-[#006C4C]/40 border-[#89F8C7]/60 text-[#89F8C7]'
+                      : 'bg-[#202226] border-[#2B2C30] text-[#8E9192] hover:text-white'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-[#FFDF9E]" />
+                    <span>مجسم كتاب إيصال السالك</span>
+                  </span>
+                  <span>{currentAdjustments.bookGraphicOverlay?.enabled ? 'مفعّل' : 'معطل'}</span>
+                </button>
+              </div>
+
             </div>
 
           </div>
         )}
+
 
       </div>
 

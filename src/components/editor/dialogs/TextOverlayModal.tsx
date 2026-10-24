@@ -23,8 +23,6 @@ export const TextOverlayModal: React.FC<TextOverlayModalProps> = ({
   onSaveOverlays,
   duration,
 }) => {
-  if (!isOpen) return null;
-
   const [overlays, setOverlays] = useState<TextOverlay[]>(textOverlays);
   const [activeTab, setActiveTab] = useState<'custom' | 'quran' | 'hadith'>('quran');
   
@@ -61,6 +59,8 @@ export const TextOverlayModal: React.FC<TextOverlayModalProps> = ({
     setOverlays(updated);
     onSaveOverlays(updated);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">

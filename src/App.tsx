@@ -57,7 +57,8 @@ export default function App() {
   const handleSelectRatio = (
     ratio: AspectRatioType, 
     customVideoUrl?: string, 
-    customVideoName?: string
+    customVideoName?: string,
+    mediaDuration?: number
   ) => {
     const timestamp = Date.now();
     const defaultThumbnail = 
@@ -65,6 +66,7 @@ export default function App() {
       ratio === '16:9' ? ASSET_QURAN_LIGHT : ASSET_ARABIC_ORNAMENT;
 
     const isAudio = /\.(mp3|wav|m4a|ogg|aac|flac)$/i.test(customVideoName || '');
+    const initialDuration = mediaDuration && mediaDuration > 0 ? mediaDuration : (isAudio ? 60 : 30);
 
     const newDraft: ProjectDraft = {
       id: `draft_${timestamp}`,
@@ -74,7 +76,7 @@ export default function App() {
       aspectRatio: ratio,
       createdAt: timestamp,
       updatedAt: timestamp,
-      duration: isAudio ? 30 : 15,
+      duration: initialDuration,
       videoSourceUrl: isAudio ? defaultThumbnail : (customVideoUrl || defaultThumbnail),
       videoSourceName: customVideoName || (ratio === '9:16' ? 'مشهد المئذنة الذهبي.mp4' : ratio === '16:9' ? 'مصحف المسجد العتيق.mp4' : 'زخرفة إسلامية.mp4'),
       isCustomVideo: !!customVideoUrl && !isAudio,
@@ -86,10 +88,12 @@ export default function App() {
             title: customVideoName?.replace(/\.[^/.]+$/, '') || 'تسجيل صوتي',
             artist: 'ملف مرفوع من جهازك',
             category: 'sheikh_recording',
-            duration: 30,
+            duration: initialDuration,
             audioUrl: customVideoUrl,
             isCustomUpload: true,
             type: 'file',
+            trimStart: 0,
+            trimEnd: initialDuration,
           }
         : null,
       replacedAudioVolume: 0.9,

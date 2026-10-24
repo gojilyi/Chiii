@@ -28,10 +28,11 @@ import {
   ASSET_IYSAL_WHITE_MOSQUE,
   ASSET_IYSAL_WOODEN_MINBAR
 } from '../constants/autoLectureDefaults';
+import { extractMediaDuration } from '../services/audioEngine';
 
 interface HomeScreenProps {
   drafts: ProjectDraft[];
-  onSelectRatio: (ratio: AspectRatioType, customVideoUrl?: string, customVideoName?: string) => void;
+  onSelectRatio: (ratio: AspectRatioType, customVideoUrl?: string, customVideoName?: string, mediaDuration?: number) => void;
   onResumeDraft: (draft: ProjectDraft) => void;
   onDuplicateDraft: (id: string) => void;
   onDeleteDraft: (id: string) => void;
@@ -49,11 +50,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedRatioForUpload, setSelectedRatioForUpload] = React.useState<AspectRatioType>('9:16');
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const url = URL.createObjectURL(file);
-      onSelectRatio(selectedRatioForUpload, url, file.name);
+      const mediaDuration = await extractMediaDuration(file);
+      onSelectRatio(selectedRatioForUpload, url, file.name, mediaDuration);
     }
   };
 

@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ProjectDraft, ExportResolutionType } from '../types';
+import { ProjectDraft, ExportResolutionType, BackgroundAdjustments } from '../types';
+import { DEFAULT_BACKGROUND_ADJUSTMENTS } from '../constants/defaults';
 
 export interface RenderProgressCallback {
   (progressPercent: number, stageDescription: string, logLine?: string): void;
@@ -21,6 +22,7 @@ export interface RenderResult {
 export class VideoRenderingEngine {
   /**
    * Determine best supported video format in the current browser
+   * Evaluates video/mp4 first, then video/webm variants per user specifications
    */
   static getSupportedVideoFormat(): { mimeType: string; extension: string } {
     if (typeof MediaRecorder === 'undefined') {
@@ -28,10 +30,14 @@ export class VideoRenderingEngine {
     }
 
     const candidates = [
+      // 1. Try MP4 first
       { mime: 'video/mp4;codecs=avc1,mp4a.40.2', ext: 'mp4' },
       { mime: 'video/mp4;codecs=h264,aac', ext: 'mp4' },
       { mime: 'video/mp4', ext: 'mp4' },
+      // 2. Try WebM VP9 next
       { mime: 'video/webm;codecs=vp9,opus', ext: 'webm' },
+      { mime: 'video/webm;codecs=vp9', ext: 'webm' },
+      // 3. Fallback to standard WebM VP8 / default
       { mime: 'video/webm;codecs=vp8,opus', ext: 'webm' },
       { mime: 'video/webm', ext: 'webm' },
     ];
@@ -41,7 +47,9 @@ export class VideoRenderingEngine {
         if (MediaRecorder.isTypeSupported(c.mime)) {
           return { mimeType: c.mime, extension: c.ext };
         }
-      } catch {}
+      } catch {
+        // Continue checking
+      }
     }
 
     return { mimeType: 'video/webm', extension: 'webm' };
@@ -49,7 +57,8 @@ export class VideoRenderingEngine {
 
   /**
    * Draws a complete composite frame of the studio at any given time point:
-   * Background image + spiritual visual effects + Quranic text + Calligraphy + Particles.
+   * Background image/video + Adjustments + Spiritual visual effects + Quranic text + Calligraphy + Particles + Media Clips.
+   * Completely synchronized with PreviewPlayer.
    */
   static drawCompositeFrame(
     ctx: CanvasRenderingContext2D,
@@ -57,7 +66,8 @@ export class VideoRenderingEngine {
     baseImage: HTMLImageElement,
     isImageLoaded: boolean,
     draft: ProjectDraft,
-    animTime: number
+    animTime: number,
+    clipImagesMap?: Map<string, HTMLImageElement>
   ) {
     const currentTime = animTime;
 
@@ -65,7 +75,50 @@ export class VideoRenderingEngine {
     ctx.fillStyle = '#0a1411';
     ctx.fillRect(0, 0, dims.width, dims.height);
 
-    // B. Base Image / Video
+    ctx.save();
+
+    // Pulse heartbeat motion
+    const pulseEffect = draft.effects.find((e) => e.id === 'pulse_heartbeat' && e.enabled);
+    if (pulseEffect) {
+      const pulseScale = 1 + Math.sin(animTime * 3.5) * ((pulseEffect.intensity / 100) * 0.025);
+      ctx.translate(dims.width / 2, dims.height / 2);
+      ctx.scale(pulseScale, pulseScale);
+      ctx.translate(-dims.width / 2, -dims.height / 2);
+    }
+
+    // Subtle zoom (Ken Burns)
+    const zoomEffect = draft.effects.find((e) => e.id === 'subtle_zoom' && e.enabled);
+    if (zoomEffect) {
+      const durationVal = Math.max(draft.duration || 0, 1);
+      const zoomScale = 1 + ((currentTime / durationVal) * (zoomEffect.intensity / 100) * 0.08);
+      ctx.translate(dims.width / 2, dims.height / 2);
+      ctx.scale(zoomScale, zoomScale);
+      ctx.translate(-dims.width / 2, -dims.height / 2);
+    }
+
+    const bgAdj: BackgroundAdjustments = draft.backgroundAdjustments || { ...DEFAULT_BACKGROUND_ADJUSTMENTS };
+
+    // B. Base Image / Video with Filters & Transformations
+    ctx.save();
+
+    const filterParts: string[] = [
+      `brightness(${bgAdj.brightness}%)`,
+      `contrast(${bgAdj.contrast}%)`
+    ];
+    if (bgAdj.blur > 0) {
+      filterParts.push(`blur(${bgAdj.blur}px)`);
+    }
+    ctx.filter = filterParts.join(' ');
+
+    const centerX = dims.width / 2;
+    const centerY = dims.height / 2;
+    const panXOffset = (bgAdj.panX / 100) * dims.width;
+    const panYOffset = (bgAdj.panY / 100) * dims.height;
+
+    ctx.translate(centerX + panXOffset, centerY + panYOffset);
+    ctx.scale(bgAdj.scale * (bgAdj.flipHorizontal ? -1 : 1), bgAdj.scale);
+    ctx.translate(-centerX, -centerY);
+
     if (isImageLoaded && baseImage.complete && baseImage.naturalWidth > 0) {
       const imgAspect = baseImage.naturalWidth / baseImage.naturalHeight;
       const canvasAspect = dims.width / dims.height;
@@ -90,6 +143,216 @@ export class VideoRenderingEngine {
       grad.addColorStop(1, '#050c0a');
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, dims.width, dims.height);
+    }
+
+    ctx.restore();
+    ctx.filter = 'none';
+
+    // B.1. Color Grading Filter
+    if (bgAdj.colorGrade && bgAdj.colorGrade !== 'none') {
+      ctx.save();
+      if (bgAdj.colorGrade === 'warm_gold') {
+        ctx.fillStyle = 'rgba(255, 190, 70, 0.18)';
+        ctx.fillRect(0, 0, dims.width, dims.height);
+      } else if (bgAdj.colorGrade === 'emerald_islamic') {
+        ctx.fillStyle = 'rgba(0, 108, 76, 0.22)';
+        ctx.fillRect(0, 0, dims.width, dims.height);
+      } else if (bgAdj.colorGrade === 'vintage_amber') {
+        ctx.fillStyle = 'rgba(200, 130, 40, 0.22)';
+        ctx.fillRect(0, 0, dims.width, dims.height);
+      } else if (bgAdj.colorGrade === 'serene_blue') {
+        ctx.fillStyle = 'rgba(30, 90, 150, 0.18)';
+        ctx.fillRect(0, 0, dims.width, dims.height);
+      } else if (bgAdj.colorGrade === 'monochrome') {
+        ctx.fillStyle = 'rgba(120, 120, 120, 0.25)';
+        ctx.fillRect(0, 0, dims.width, dims.height);
+      }
+      ctx.restore();
+    }
+
+    // B.2. Overlay Darkness
+    if (bgAdj.overlayDarkness > 0) {
+      ctx.save();
+      ctx.fillStyle = `rgba(0, 0, 0, ${bgAdj.overlayDarkness / 100})`;
+      ctx.fillRect(0, 0, dims.width, dims.height);
+      ctx.restore();
+    }
+
+    // B.3. Vignette
+    if (bgAdj.vignette > 0) {
+      ctx.save();
+      const vigGrad = ctx.createRadialGradient(
+        dims.width / 2,
+        dims.height / 2,
+        dims.width * 0.32,
+        dims.width / 2,
+        dims.height / 2,
+        dims.width * 0.72
+      );
+      vigGrad.addColorStop(0, 'transparent');
+      vigGrad.addColorStop(1, `rgba(0, 0, 0, ${(bgAdj.vignette / 100) * 0.85})`);
+      ctx.fillStyle = vigGrad;
+      ctx.fillRect(0, 0, dims.width, dims.height);
+      ctx.restore();
+    }
+
+    // B.4. Golden Arch Frame
+    if (bgAdj.showGoldArchFrame) {
+      ctx.save();
+      const pad = 16;
+      ctx.strokeStyle = 'rgba(235, 195, 75, 0.85)';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = 'rgba(255, 215, 0, 0.6)';
+      ctx.shadowBlur = 8;
+      
+      ctx.beginPath();
+      ctx.moveTo(pad, dims.height - pad);
+      ctx.lineTo(pad, pad + 50);
+      ctx.quadraticCurveTo(dims.width / 2, pad - 15, dims.width - pad, pad + 50);
+      ctx.lineTo(dims.width - pad, dims.height - pad);
+      ctx.closePath();
+      ctx.stroke();
+
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(255, 235, 150, 0.45)';
+      ctx.beginPath();
+      ctx.moveTo(pad + 5, dims.height - pad - 5);
+      ctx.lineTo(pad + 5, pad + 54);
+      ctx.quadraticCurveTo(dims.width / 2, pad - 8, dims.width - pad - 5, pad + 54);
+      ctx.lineTo(dims.width - pad - 5, dims.height - pad - 5);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // B.5. Lesson Banner Overlay
+    if (bgAdj.bannerOverlay?.enabled) {
+      const b = bgAdj.bannerOverlay;
+      const bScale = b.scale || 1.0;
+      const bx = (b.positionX / 100) * dims.width;
+      const by = (b.positionY / 100) * dims.height;
+
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.scale(bScale, bScale);
+
+      const bannerW = Math.min(dims.width * 0.48, 260);
+      const bannerH = 100;
+      const wHalf = bannerW / 2;
+      const hHalf = bannerH / 2;
+
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+      ctx.shadowBlur = 14;
+      ctx.shadowOffsetY = 4;
+
+      const bGrad = ctx.createLinearGradient(0, -hHalf, 0, hHalf);
+      bGrad.addColorStop(0, 'rgba(25, 18, 10, 0.88)');
+      bGrad.addColorStop(0.5, 'rgba(15, 11, 7, 0.94)');
+      bGrad.addColorStop(1, 'rgba(8, 6, 4, 0.98)');
+      ctx.fillStyle = bGrad;
+
+      ctx.beginPath();
+      ctx.moveTo(-wHalf, hHalf);
+      ctx.lineTo(-wHalf, -hHalf + 22);
+      ctx.quadraticCurveTo(0, -hHalf - 14, wHalf, -hHalf + 22);
+      ctx.lineTo(wHalf, hHalf);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = 'rgba(229, 184, 66, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = 'rgba(255, 223, 140, 0.5)';
+      ctx.beginPath();
+      ctx.moveTo(-wHalf + 4, hHalf - 4);
+      ctx.lineTo(-wHalf + 4, -hHalf + 24);
+      ctx.quadraticCurveTo(0, -hHalf - 8, wHalf - 4, -hHalf + 24);
+      ctx.lineTo(wHalf - 4, hHalf - 4);
+      ctx.closePath();
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 15px "Cairo", sans-serif';
+      ctx.fillText(b.headerText || 'شرح كتاب', 0, -20);
+
+      ctx.fillStyle = '#FFDF9E';
+      ctx.font = 'bold 26px "Aref Ruqaa", "Amiri", serif';
+      ctx.shadowColor = 'rgba(255, 200, 50, 0.85)';
+      ctx.shadowBlur = 12;
+      ctx.fillText(b.mainTitle || 'إيصال السالك', 0, 8);
+
+      ctx.fillStyle = '#E3E2E6';
+      ctx.font = '600 11px "Cairo", sans-serif';
+      ctx.shadowBlur = 4;
+      ctx.fillText(b.subtitle || 'إلى أصول مذهب الإمام مالك', 0, 32);
+
+      ctx.restore();
+    }
+
+    // B.6. Book Graphic Overlay
+    if (bgAdj.bookGraphicOverlay?.enabled) {
+      const bk = bgAdj.bookGraphicOverlay;
+      const bkScale = bk.scale || 1.0;
+      const bkx = (bk.positionX / 100) * dims.width;
+      const bky = (bk.positionY / 100) * dims.height;
+
+      ctx.save();
+      ctx.translate(bkx, bky);
+      ctx.scale(bkScale, bkScale);
+      ctx.rotate(-0.1);
+
+      const bookW = 95;
+      const bookH = 138;
+
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+      ctx.shadowBlur = 16;
+      ctx.shadowOffsetX = 6;
+      ctx.shadowOffsetY = 8;
+
+      const coverGrad = ctx.createLinearGradient(-bookW / 2, 0, bookW / 2, 0);
+      coverGrad.addColorStop(0, '#003824');
+      coverGrad.addColorStop(0.2, '#005437');
+      coverGrad.addColorStop(0.85, '#00472e');
+      coverGrad.addColorStop(1, '#002919');
+      ctx.fillStyle = coverGrad;
+
+      ctx.beginPath();
+      ctx.roundRect(-bookW / 2, -bookH / 2, bookW, bookH, [5, 10, 10, 5]);
+      ctx.fill();
+
+      ctx.shadowColor = 'transparent';
+      ctx.fillStyle = '#EDE8DC';
+      ctx.fillRect(bookW / 2 - 4, -bookH / 2 + 5, 4, bookH - 10);
+      ctx.fillRect(-bookW / 2 + 6, bookH / 2 - 4, bookW - 10, 4);
+
+      ctx.strokeStyle = 'rgba(229, 184, 66, 0.88)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(-bookW / 2 + 6, -bookH / 2 + 6, bookW - 14, bookH - 14);
+
+      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = 'rgba(255, 223, 140, 0.5)';
+      ctx.strokeRect(-bookW / 2 + 10, -bookH / 2 + 10, bookW - 22, bookH - 22);
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#FFE082';
+      ctx.font = 'bold 15px "Aref Ruqaa", "Amiri", serif';
+      ctx.fillText(bk.title || 'إيصال السالك', 0, -12);
+
+      ctx.fillStyle = '#E0D0FF';
+      ctx.font = '9px "Cairo", sans-serif';
+      ctx.fillText(bk.author || 'أصول مذهب مالك', 0, 8);
+
+      ctx.fillStyle = 'rgba(229, 184, 66, 0.85)';
+      ctx.beginPath();
+      ctx.arc(0, 30, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
     }
 
     // C. Spiritual & Montage Effects
@@ -167,6 +430,25 @@ export class VideoRenderingEngine {
         ctx.strokeStyle = `rgba(229, 184, 66, ${(eff.intensity / 100) * 0.85})`;
         ctx.lineWidth = 2.5;
         ctx.strokeRect(margin, margin, dims.width - margin * 2, dims.height - margin * 2);
+
+        // Inner delicate line
+        ctx.strokeStyle = `rgba(229, 184, 66, ${(eff.intensity / 100) * 0.45})`;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(margin + 6, margin + 6, dims.width - (margin + 6) * 2, dims.height - (margin + 6) * 2);
+
+        // Corner accents
+        const corners = [
+          [margin + 6, margin + 6],
+          [dims.width - margin - 6, margin + 6],
+          [margin + 6, dims.height - margin - 6],
+          [dims.width - margin - 6, dims.height - margin - 6]
+        ];
+        ctx.fillStyle = `rgba(229, 184, 66, ${(eff.intensity / 100) * 0.9})`;
+        corners.forEach(([cx, cy]) => {
+          ctx.beginPath();
+          ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
         ctx.restore();
       }
 
@@ -187,9 +469,73 @@ export class VideoRenderingEngine {
         }
         ctx.restore();
       }
+
+      // 7. Spiritual Glow
+      if (eff.id === 'spiritual_glow') {
+        ctx.save();
+        const radial = ctx.createRadialGradient(
+          dims.width / 2,
+          dims.height / 2,
+          40,
+          dims.width / 2,
+          dims.height / 2,
+          dims.width * 0.65
+        );
+        radial.addColorStop(0, `rgba(137, 248, 199, ${(eff.intensity / 100) * 0.22})`);
+        radial.addColorStop(1, 'transparent');
+        ctx.fillStyle = radial;
+        ctx.fillRect(0, 0, dims.width, dims.height);
+        ctx.restore();
+      }
+
+      // 8. Golden Dust
+      if (eff.id === 'golden_dust') {
+        ctx.save();
+        ctx.fillStyle = `rgba(255, 240, 180, ${(eff.intensity / 100) * 0.35})`;
+        for (let i = 0; i < 40; i++) {
+          const dx = (Math.sin(i * 13.5 + animTime * 0.5) * 0.5 + 0.5) * dims.width;
+          const dy = ((animTime * 15 + i * 37) % dims.height);
+          ctx.beginPath();
+          ctx.arc(dx, dims.height - dy, 1.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
     });
 
-    // D. Render Active Text Overlays (Quranic Verses)
+    // D. Render Multi-Media Clips (Images / Overlays added by user)
+    const mediaClips = draft.mediaClips || [];
+    const activeVisualClips = mediaClips.filter(
+      (c) => (c.type === 'image' || c.type === 'video') && currentTime >= c.startTime && currentTime <= c.endTime
+    );
+
+    activeVisualClips.forEach((clip) => {
+      const clipImg = clipImagesMap?.get(clip.url);
+      if (clipImg && clipImg.complete && clipImg.naturalWidth > 0) {
+        ctx.save();
+        const posX = (dims.width * (clip.positionX ?? 50)) / 100;
+        const posY = (dims.height * (clip.positionY ?? 50)) / 100;
+        const scale = clip.scale ?? 1;
+        const opacity = clip.opacity ?? 1;
+
+        ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
+        ctx.translate(posX, posY);
+        ctx.scale(scale, scale);
+
+        const targetW = dims.width * 0.55;
+        const aspect = clipImg.naturalHeight / clipImg.naturalWidth;
+        const targetH = targetW * aspect;
+
+        try {
+          ctx.drawImage(clipImg, -targetW / 2, -targetH / 2, targetW, targetH);
+        } catch {
+          // Ignore drawing error for unready frames
+        }
+        ctx.restore();
+      }
+    });
+
+    // E. Render Active Text Overlays (Quranic Verses)
     draft.textOverlays.forEach((overlay) => {
       if (currentTime >= overlay.startTime && currentTime <= overlay.endTime) {
         const posX = (overlay.positionX / 100) * dims.width;
@@ -221,7 +567,7 @@ export class VideoRenderingEngine {
       }
     });
 
-    // E. Render Animated Calligraphy Story (if enabled)
+    // F. Render Animated Calligraphy Story (if enabled)
     const story = draft.calligraphyStory;
     if (story && story.enabled && story.words && story.words.length > 0) {
       const currentMs = currentTime * 1000;
@@ -255,7 +601,7 @@ export class VideoRenderingEngine {
       ctx.restore();
     }
 
-    // F. Render Particle Overlays (Amber Embers & Glowing Stars)
+    // G. Render Particle Overlays (Amber Embers & Glowing Stars)
     if (draft.particleOverlays && draft.particleOverlays.length > 0) {
       draft.particleOverlays.filter((p) => p.enabled).forEach((pConfig) => {
         ctx.save();
@@ -279,84 +625,29 @@ export class VideoRenderingEngine {
         ctx.restore();
       });
     }
+
+    ctx.restore();
   }
 
   /**
-   * Attempts native FFmpeg rendering via backend server endpoint /api/render-ffmpeg.
-   * Produces a 100% compliant H.264/AAC MP4 video with no chance of exporting as an image.
+   * Pre-loads an image URL safely
    */
-  private static async renderViaServerFFmpeg(
-    canvas: HTMLCanvasElement,
-    draft: ProjectDraft,
-    dims: { width: number; height: number },
-    fps: number,
-    filename: string,
-    totalDuration: number,
-    onProgress?: RenderProgressCallback
-  ): Promise<RenderResult | null> {
-    const canvasDataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    let audioData: string | undefined = undefined;
-
-    if (draft.replacedAudio?.audioUrl) {
-      const audioUrl = draft.replacedAudio.audioUrl;
-      if (audioUrl.startsWith('data:audio/')) {
-        audioData = audioUrl;
-      } else {
-        try {
-          const resp = await fetch(audioUrl);
-          const blob = await resp.blob();
-          audioData = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-        } catch (e) {
-          console.warn('Could not read audio data for server FFmpeg:', e);
-        }
+  private static loadImage(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      if (!url.startsWith('data:') && !url.startsWith('blob:') && url.startsWith('http')) {
+        img.crossOrigin = 'anonymous';
       }
-    }
-
-    onProgress?.(35, 'جاري تشغيل محرك FFmpeg لدمج الصورة مع صوت الشيخ...', `[ffmpeg] Encoding with -loop 1 -c:v libx264 -c:a aac -shortest`);
-
-    const res = await fetch('/api/render-ffmpeg', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image: canvasDataUrl,
-        audio: audioData,
-        audioTrimStart: draft.replacedAudio?.trimStart,
-        audioTrimEnd: draft.replacedAudio?.trimEnd,
-        width: dims.width,
-        height: dims.height,
-        fps,
-        filename,
-      }),
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(img);
+      img.src = url;
     });
-
-    if (!res.ok) {
-      throw new Error(`Server FFmpeg returned status ${res.status}`);
-    }
-
-    const blob = await res.blob();
-    if (blob.size < 1000) {
-      throw new Error('الملف الناتج صغير جداً أو غير صالح');
-    }
-
-    const blobUrl = URL.createObjectURL(blob);
-    return {
-      blob,
-      blobUrl,
-      filename,
-      mimeType: 'video/mp4',
-      sizeBytes: blob.size,
-      durationSeconds: totalDuration,
-    };
   }
 
   /**
-   * Renders the entire studio composition (Image/Video + Sheikh Audio + Spiritual Effects + Text Overlays + Calligraphy + Particles)
-   * into a genuine playable video file.
+   * Renders the studio composition into a genuine, downloadable video file (MP4 or WebM)
+   * using the MediaRecorder API, canvas.captureStream(30), and AudioContext integration.
+   * Completely avoids saving frame snapshots as images.
    */
   static async renderStudioVideo(
     draft: ProjectDraft,
@@ -364,22 +655,49 @@ export class VideoRenderingEngine {
     fps: number = 30,
     onProgress?: RenderProgressCallback
   ): Promise<RenderResult> {
-    // Calculate exact video duration strictly according to audio track length (الفيديو حسب وقت الصوت)
-    let totalDuration = 15;
-    if (draft.replacedAudio) {
-      const audioStart = draft.replacedAudio.trimStart || 0;
-      const audioEnd = draft.replacedAudio.trimEnd || draft.replacedAudio.duration || draft.duration || 15;
-      totalDuration = Math.max(1, +(audioEnd - audioStart).toFixed(2));
-    } else {
-      totalDuration = Math.max(1, +(draft.duration || 15).toFixed(2));
+    // 1. Calculate duration strictly matching audio track or longest clip - NO arbitrary 16s limits!
+    const audioTrack = draft.replacedAudio;
+    let audioTrimStart = 0;
+    let totalDuration = 0;
+
+    if (audioTrack) {
+      audioTrimStart = audioTrack.trimStart || 0;
+      const audioEnd = audioTrack.trimEnd || audioTrack.duration;
+      if (audioEnd && audioEnd > audioTrimStart) {
+        totalDuration = +(audioEnd - audioTrimStart).toFixed(2);
+      }
     }
 
+    if (totalDuration <= 0 && draft.duration) {
+      totalDuration = +draft.duration.toFixed(2);
+    }
+
+    // Ensure project duration covers any media clips or text overlays
+    if (draft.mediaClips && draft.mediaClips.length > 0) {
+      const maxClipEnd = Math.max(...draft.mediaClips.map((c) => c.endTime || 0));
+      if (maxClipEnd > totalDuration) {
+        totalDuration = +maxClipEnd.toFixed(2);
+      }
+    }
+    if (draft.textOverlays && draft.textOverlays.length > 0) {
+      const maxTextEnd = Math.max(...draft.textOverlays.map((t) => t.endTime || 0));
+      if (maxTextEnd > totalDuration) {
+        totalDuration = +maxTextEnd.toFixed(2);
+      }
+    }
+
+    if (totalDuration <= 0) {
+      totalDuration = 30;
+    }
+
+    // Determine format according to priority: video/mp4 first, then video/webm variants
     const formatInfo = this.getSupportedVideoFormat();
-    const filename = `الشيخ_العيد_${draft.title ? draft.title.replace(/\s+/g, '_') : 'مقطع'}_${resolution}.${formatInfo.extension}`;
+    const cleanTitle = draft.title ? draft.title.replace(/\s+/g, '_') : 'مقطع_الشيخ_العيد';
+    const filename = `${cleanTitle}_${resolution}.${formatInfo.extension}`;
 
     onProgress?.(5, 'جاري تهيئة لوحة الرندرة ومسارات المعالجة...', `[render] Target output: ${filename} (${totalDuration}s @ ${formatInfo.mimeType})`);
 
-    // 1. Calculate rendering canvas dimensions based on aspect ratio & resolution
+    // 2. Calculate rendering dimensions based on aspect ratio & resolution
     const getDims = () => {
       if (resolution === '4k') {
         return draft.aspectRatio === '9:16' ? { width: 1080, height: 1920 } :
@@ -395,7 +713,7 @@ export class VideoRenderingEngine {
 
     const dims = getDims();
 
-    // 2. Create off-screen canvas for frame synthesis
+    // 3. Create rendering canvas
     const canvas = document.createElement('canvas');
     canvas.width = dims.width;
     canvas.height = dims.height;
@@ -404,195 +722,258 @@ export class VideoRenderingEngine {
       throw new Error('فشل إنشاء سياق رسم Canvas ثنائي الأبعاد');
     }
 
-    // 3. Load base visual asset (Image or Video)
+    // 4. Preload all visual media (Base Image + Multi-Media Clips) so canvas never draws blank
     onProgress?.(10, 'جاري تحميل خلفية الصورة والوسائط...', `[render] Loading visual source: ${draft.videoSourceName || 'background'}`);
 
-    const baseImage = new Image();
-    let isImageLoaded = false;
     const visualSourceUrl = draft.videoSourceUrl || '/assets/aistudio/29515ac3-1b7a-4437-8444-84464b32b5fe_33174229.jpeg';
+    const baseImage = await this.loadImage(visualSourceUrl);
+    const isImageLoaded = baseImage.complete && baseImage.naturalWidth > 0;
 
-    if (!visualSourceUrl.startsWith('data:') && !visualSourceUrl.startsWith('blob:') && visualSourceUrl.startsWith('http')) {
-      baseImage.crossOrigin = 'anonymous';
-    }
-    baseImage.src = visualSourceUrl;
-
-    await new Promise<void>((resolve) => {
-      baseImage.onload = () => {
-        isImageLoaded = true;
-        resolve();
-      };
-      baseImage.onerror = () => {
-        isImageLoaded = false;
-        resolve();
-      };
-      setTimeout(resolve, 2500);
-    });
-
-    // Draw initial composite frame
-    this.drawCompositeFrame(ctx, dims, baseImage, isImageLoaded, draft, 0);
-
-    // 4. Try native FFmpeg server-side render first (Fastest, creates genuine MP4 video)
-    try {
-      onProgress?.(20, 'جاري المعالجة بمحرك FFmpeg المباشر...', '[ffmpeg] Sending request to native FFmpeg pipeline');
-      const serverResult = await this.renderViaServerFFmpeg(canvas, draft, dims, fps, filename, totalDuration, onProgress);
-      if (serverResult) {
-        onProgress?.(100, 'اكتمل إنتاج الفيديو بنجاح عبر محرك FFmpeg!', `✅ [done] Generated ${filename} (${(serverResult.sizeBytes / (1024 * 1024)).toFixed(2)} MB)`);
-        return serverResult;
+    const clipImagesMap = new Map<string, HTMLImageElement>();
+    const visualClips = (draft.mediaClips || []).filter((c) => c.type === 'image' || c.type === 'video');
+    for (const clip of visualClips) {
+      if (!clipImagesMap.has(clip.url)) {
+        const loaded = await this.loadImage(clip.url);
+        clipImagesMap.set(clip.url, loaded);
       }
-    } catch (serverErr: any) {
-      console.warn('Native FFmpeg endpoint skipped, proceeding with client-side synthesis:', serverErr?.message);
-      onProgress?.(25, 'المتابعة عبر محرك الرندرة المدمج...', `[recorder] Fallback to in-browser MediaRecorder (${serverErr?.message || 'local'})`);
     }
 
-    // 5. Setup AudioContext and Stream Destination for Web Audio Mixing (Client-Side Fallback)
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const audioCtx = new AudioCtx();
-    if (audioCtx.state === 'suspended') {
-      await audioCtx.resume().catch(() => {});
-    }
+    // 5. Draw initial frame at t = 0 to guarantee the canvas is primed before stream capture
+    this.drawCompositeFrame(ctx, dims, baseImage, isImageLoaded, draft, 0, clipImagesMap);
 
-    const audioDest = audioCtx.createMediaStreamDestination();
-    const masterGain = audioCtx.createGain();
-    masterGain.gain.setValueAtTime(0.9, audioCtx.currentTime);
-    masterGain.connect(audioDest);
-
-    // Connect user audio track if provided (NO SYNTHETIC TONES OR CHORDS - PURE USER VOICE ONLY)
+    // 6. Audio Integration via AudioContext & MediaStreamDestination
+    let audioCtx: AudioContext | null = null;
+    let audioDest: MediaStreamAudioDestinationNode | null = null;
     let audioBufferSource: AudioBufferSourceNode | null = null;
     let audioElement: HTMLAudioElement | null = null;
 
-    if (draft.replacedAudio?.audioUrl) {
-      const audioUrl = draft.replacedAudio.audioUrl;
-      const audioTrimStart = draft.replacedAudio.trimStart || 0;
-      const userVolume = Math.max(0, Math.min(1, draft.replacedAudioVolume ?? 0.9));
+    try {
+      const AudioCtxConstructor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtxConstructor) {
+        audioCtx = new AudioCtxConstructor();
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume().catch(() => {});
+        }
+        audioDest = audioCtx.createMediaStreamDestination();
 
-      const trackGain = audioCtx.createGain();
-      trackGain.gain.setValueAtTime(userVolume, audioCtx.currentTime);
-      trackGain.connect(masterGain);
+        if (draft.replacedAudio?.audioUrl) {
+          const audioUrl = draft.replacedAudio.audioUrl;
+          const userVolume = Math.max(0, Math.min(1, draft.replacedAudioVolume ?? 0.95));
 
-      try {
-        const response = await fetch(audioUrl);
-        const arrayBuf = await response.arrayBuffer();
-        const decodedBuffer = await audioCtx.decodeAudioData(arrayBuf);
-        audioBufferSource = audioCtx.createBufferSource();
-        audioBufferSource.buffer = decodedBuffer;
-        audioBufferSource.connect(trackGain);
-        audioBufferSource.start(0, audioTrimStart, totalDuration);
-        onProgress?.(30, 'تم تجهيز صوت الشيخ ومزامنته...', `[audio] Loaded ${decodedBuffer.duration.toFixed(1)}s user audio`);
-      } catch (decodeErr) {
-        console.warn('AudioBuffer decode fallback to Audio element:', decodeErr);
-        try {
-          audioElement = new Audio();
-          if (audioUrl.startsWith('http')) audioElement.crossOrigin = 'anonymous';
-          audioElement.src = audioUrl;
-          audioElement.volume = userVolume;
-          if (audioTrimStart > 0) audioElement.currentTime = audioTrimStart;
-          const sourceNode = audioCtx.createMediaElementSource(audioElement);
-          sourceNode.connect(trackGain);
-          await audioElement.play().catch(() => {});
-        } catch (e2) {
-          console.warn('HTMLAudio fallback notice:', e2);
+          const gainNode = audioCtx.createGain();
+          gainNode.gain.setValueAtTime(userVolume, audioCtx.currentTime);
+          gainNode.connect(audioDest);
+
+          try {
+            const resp = await fetch(audioUrl);
+            const arrayBuf = await resp.arrayBuffer();
+            const decodedBuffer = await audioCtx.decodeAudioData(arrayBuf);
+            const realAudioDuration = +(decodedBuffer.duration).toFixed(2);
+
+            // If audio duration is longer or project duration not yet set, expand to the full real duration of audio!
+            if (realAudioDuration > totalDuration || !draft.replacedAudio.trimEnd || draft.syncDurationToAudio) {
+              totalDuration = Math.max(1, +(realAudioDuration - audioTrimStart).toFixed(2));
+            }
+
+            audioBufferSource = audioCtx.createBufferSource();
+            audioBufferSource.buffer = decodedBuffer;
+            audioBufferSource.connect(gainNode);
+            onProgress?.(20, 'تم تجهيز صوت الشيخ ومزامنته مع الفيديو...', `[audio] Decoded audio buffer: ${realAudioDuration}s`);
+          } catch (decodeErr) {
+            console.warn('AudioBuffer decode fallback to HTMLAudioElement:', decodeErr);
+            try {
+              audioElement = new Audio();
+              if (audioUrl.startsWith('http')) audioElement.crossOrigin = 'anonymous';
+              audioElement.src = audioUrl;
+              audioElement.volume = userVolume;
+              if (audioTrimStart > 0) audioElement.currentTime = audioTrimStart;
+              audioElement.onloadedmetadata = () => {
+                if (audioElement && audioElement.duration && Number.isFinite(audioElement.duration)) {
+                  const elemDur = +(audioElement.duration).toFixed(2);
+                  if (elemDur > totalDuration || !draft.replacedAudio?.trimEnd) {
+                    totalDuration = Math.max(1, +(elemDur - audioTrimStart).toFixed(2));
+                  }
+                }
+              };
+              const elemSource = audioCtx.createMediaElementSource(audioElement);
+              elemSource.connect(gainNode);
+            } catch (e2) {
+              console.warn('HTMLAudio fallback notice:', e2);
+            }
+          }
         }
       }
+    } catch (audioErr) {
+      console.warn('AudioContext setup skipped or not supported:', audioErr);
     }
 
-    // 6. Capture combined MediaStream (Canvas Video + Mixed Audio)
-    const canvasStream = canvas.captureStream(fps);
-    const audioTracks = audioDest.stream.getAudioTracks();
+    // 7. Create Canvas Stream (30 frames per second)
+    const streamMethod = (canvas as any).captureStream || (canvas as any).mozCaptureStream;
+    if (!streamMethod) {
+      throw new Error('متصفحك لا يدعم خاصية captureStream لتسجيل الفيديو');
+    }
+    const canvasStream: MediaStream = streamMethod.call(canvas, fps);
+
+    // Merge Audio Tracks if audio exists
+    const audioTracks = audioDest ? audioDest.stream.getAudioTracks() : [];
     const combinedTracks = [
       ...canvasStream.getVideoTracks(),
       ...(audioTracks.length > 0 ? audioTracks : []),
     ];
-
     const combinedStream = new MediaStream(combinedTracks);
 
-    // 7. Initialize MediaRecorder with graceful MIME fallback
+    // 8. Initialize MediaRecorder with prioritized container & codec
     const recordedChunks: Blob[] = [];
     let mediaRecorder: MediaRecorder;
+
+    const bitRate = resolution === '4k' ? 9000000 : resolution === '720p' ? 3000000 : 5500000;
+
     try {
       mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: formatInfo.mimeType,
-        videoBitsPerSecond: resolution === '4k' ? 8000000 : 4500000,
+        videoBitsPerSecond: bitRate,
       });
     } catch {
-      // Fallback without mimeType option
-      mediaRecorder = new MediaRecorder(combinedStream);
+      try {
+        mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
+      } catch {
+        mediaRecorder = new MediaRecorder(combinedStream);
+      }
     }
 
-    mediaRecorder.ondataavailable = (e) => {
+    mediaRecorder.ondataavailable = (e: BlobEvent) => {
       if (e.data && e.data.size > 0) {
         recordedChunks.push(e.data);
       }
     };
 
+    // 9. Start recording & playback synchronized from start to end (Normal 1x speed)
+    onProgress?.(25, 'بدء تسجيل الفيديو اللحظي...', `[recorder] Started MediaRecorder @ ${fps}fps (${totalDuration}s)`);
+
     mediaRecorder.start(100);
 
-    onProgress?.(35, 'بدء الرندرة والدمج اللحظي للفيديو والصوت...', `[ffmpeg/recorder] Started real-time synthesis pipeline @ ${fps}fps (${totalDuration}s)`);
+    let audioHasEnded = false;
+    if (audioBufferSource) {
+      try {
+        audioBufferSource.onended = () => {
+          audioHasEnded = true;
+        };
+        audioBufferSource.start(0, audioTrimStart, totalDuration);
+      } catch (e) {
+        console.warn('AudioBuffer start notice:', e);
+      }
+    } else if (audioElement) {
+      audioElement.onended = () => {
+        audioHasEnded = true;
+      };
+      audioElement.play().catch(() => {});
+    }
 
-    // 8. Wall-clock driven render loop for exact audio-video synchronization
     const startTime = performance.now();
     const totalDurationMs = totalDuration * 1000;
-    const totalFrames = Math.max(1, Math.round(totalDuration * fps));
     let frameIndex = 0;
 
     return new Promise<RenderResult>((resolve, reject) => {
-      const renderNextFrame = () => {
+      let isCompleted = false;
+
+      const stopAndFinalize = () => {
+        if (isCompleted) return;
+        isCompleted = true;
+
+        onProgress?.(96, 'جاري حزم بيانات الفيديو وتوليد الملف النهائي...', '[recorder] Finalizing video blob...');
+
+        try {
+          audioBufferSource?.stop();
+          audioElement?.pause();
+          audioCtx?.close().catch(() => {});
+        } catch {}
+
+        mediaRecorder.onstop = () => {
+          const finalMime = mediaRecorder.mimeType || formatInfo.mimeType;
+          const finalBlob = new Blob(recordedChunks, { type: finalMime });
+
+          if (finalBlob.size < 500) {
+            reject(new Error('فشل تسجيل دفق الفيديو: لم يتم التقاط بيانات كافية'));
+            return;
+          }
+
+          const blobUrl = URL.createObjectURL(finalBlob);
+
+          // 10. Automatically trigger download of video file per user requirement
+          try {
+            const downloadLink = document.createElement('a');
+            downloadLink.style.display = 'none';
+            downloadLink.href = blobUrl;
+            downloadLink.download = filename;
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            setTimeout(() => {
+              if (document.body.contains(downloadLink)) {
+                document.body.removeChild(downloadLink);
+              }
+            }, 500);
+          } catch (dlErr) {
+            console.warn('Automatic download trigger notification:', dlErr);
+          }
+
+          onProgress?.(100, 'اكتمل إنتاج وتنزيل الفيديو بنجاح!', `✅ [done] Generated ${filename} (${(finalBlob.size / (1024 * 1024)).toFixed(2)} MB)`);
+
+          resolve({
+            blob: finalBlob,
+            blobUrl,
+            filename,
+            mimeType: finalMime,
+            sizeBytes: finalBlob.size,
+            durationSeconds: totalDuration,
+          });
+        };
+
+        try {
+          mediaRecorder.stop();
+        } catch (stopErr) {
+          reject(stopErr);
+        }
+      };
+
+      const renderLoop = () => {
+        if (isCompleted) return;
+
         const now = performance.now();
         const elapsedMs = now - startTime;
-        const currentTime = Math.min(totalDuration, elapsedMs / 1000);
-        const animTime = currentTime;
+        const currentSec = Math.min(totalDuration, elapsedMs / 1000);
 
-        if (elapsedMs >= totalDurationMs) {
-          onProgress?.(95, 'جاري حزم بيانات الفيديو وتوليد ملف MP4/WebM...', '[recorder] Finalizing container metadata');
-          
-          try {
-            audioBufferSource?.stop();
-            audioElement?.pause();
-            audioCtx.close().catch(() => {});
-          } catch {}
-
-          mediaRecorder.onstop = () => {
-            const finalMime = mediaRecorder.mimeType || formatInfo.mimeType;
-            const finalBlob = new Blob(recordedChunks, { type: finalMime });
-            if (finalBlob.size < 500) {
-              reject(new Error('فشل تسجيل دفق الفيديو'));
-              return;
-            }
-            const blobUrl = URL.createObjectURL(finalBlob);
-
-            onProgress?.(100, 'اكتمل إنتاج الفيديو بنجاح!', `✅ [done] Generated ${filename} (${(finalBlob.size / (1024 * 1024)).toFixed(2)} MB)`);
-
-            resolve({
-              blob: finalBlob,
-              blobUrl,
-              filename,
-              mimeType: finalMime,
-              sizeBytes: finalBlob.size,
-              durationSeconds: totalDuration,
-            });
-          };
-
-          mediaRecorder.stop();
+        // Stop recording when total time is reached OR when audio onended fires after playing
+        if (elapsedMs >= totalDurationMs || (audioHasEnded && elapsedMs >= 500)) {
+          stopAndFinalize();
           return;
         }
 
-        // Draw composite frame
-        VideoRenderingEngine.drawCompositeFrame(ctx, dims, baseImage, isImageLoaded, draft, animTime);
+        // Draw composite frame for this exact time stamp
+        VideoRenderingEngine.drawCompositeFrame(
+          ctx,
+          dims,
+          baseImage,
+          isImageLoaded,
+          draft,
+          currentSec,
+          clipImagesMap
+        );
 
         frameIndex++;
 
-        // Update progress callback regularly
-        if (frameIndex % 4 === 0 || elapsedMs >= totalDurationMs) {
-          const progressRatio = Math.min(1, elapsedMs / totalDurationMs);
-          const pct = Math.min(94, Math.round(35 + progressRatio * 59));
-          const sec = currentTime.toFixed(1);
-          const statLog = `frame=${frameIndex.toString().padStart(4, ' ')} fps=${fps} time=00:00:${sec.padStart(4, '0')} progress=${pct}%`;
-          onProgress?.(pct, `جاري ترميز إطارات الفيديو (${frameIndex} إطار - ${sec}s / ${totalDuration.toFixed(1)}s)...`, statLog);
+        // Update progress callback smoothly
+        if (frameIndex % 3 === 0 || elapsedMs >= totalDurationMs) {
+          const ratio = Math.min(1, elapsedMs / totalDurationMs);
+          const pct = Math.min(95, Math.round(25 + ratio * 70));
+          const secFormatted = currentSec.toFixed(1);
+          const logLine = `frame=${frameIndex.toString().padStart(4, ' ')} fps=${fps} time=${secFormatted}s / ${totalDuration.toFixed(1)}s progress=${pct}%`;
+          onProgress?.(pct, `جاري تسجيل إطارات الفيديو (${frameIndex} إطار - ${secFormatted}ث / ${totalDuration.toFixed(1)}ث)...`, logLine);
         }
 
-        requestAnimationFrame(renderNextFrame);
+        requestAnimationFrame(renderLoop);
       };
 
-      requestAnimationFrame(renderNextFrame);
+      requestAnimationFrame(renderLoop);
     });
   }
 }

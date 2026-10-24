@@ -38,8 +38,6 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
   onClose,
   draft,
 }) => {
-  if (!isOpen) return null;
-
   // Primary export settings: Resolution (720p, 1080p, 4K) & Format (MP4, MOV, etc.)
   const [selectedFormat, setSelectedFormat] = useState<ExportFormatType>('mp4');
   const [selectedResolution, setSelectedResolution] = useState<ExportResolutionType>('1080p');
@@ -168,6 +166,8 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       setCurrentStageText(`فشلت المعالجة: ${errMsg}`);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
@@ -367,13 +367,31 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                   {!isExporting && !isDone && (
                     <button
                       onClick={handleStartRealExport}
-                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#006C4C] to-[#00875F] hover:from-[#00573c] hover:to-[#006C4C] text-white text-xs font-bold transition-all shadow-lg active:scale-[0.98] flex items-center gap-2 shrink-0 border border-[#89F8C7]/40"
+                      className="px-6 py-3 rounded-xl bg-gradient-to-r from-[#006C4C] via-[#00875F] to-[#00A870] hover:from-[#00573c] hover:to-[#006C4C] text-white text-xs sm:text-sm font-bold transition-all shadow-lg active:scale-[0.98] flex items-center gap-2.5 shrink-0 border border-[#89F8C7]/60"
                     >
-                      <Play className="w-4 h-4 fill-current text-[#89F8C7]" />
-                      <span>بدء دمج الاستديو وتحويله لفيديو</span>
+                      <Download className="w-4 h-4 text-[#89F8C7]" />
+                      <span>تصدير الفيديو (MP4 / WebM)</span>
                     </button>
                   )}
                 </div>
+
+                {/* Export Error Alert */}
+                {exportError && (
+                  <div className="p-3.5 rounded-xl bg-red-950/40 border border-red-500/50 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                    <div className="text-xs space-y-1">
+                      <div className="font-bold text-red-300">حدث خطأ أثناء تصدير الفيديو:</div>
+                      <div className="text-red-200/90 leading-relaxed">{exportError}</div>
+                      <button
+                        onClick={handleStartRealExport}
+                        className="mt-2 px-3 py-1.5 rounded-lg bg-red-800/60 hover:bg-red-800 text-white text-xs font-semibold flex items-center gap-1.5 transition"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>إعادة المحاولة الآن</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Progress Bar */}
                 {isExporting && (
@@ -413,7 +431,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                         <div className="flex items-center gap-2 text-xs text-[#89F8C7] font-semibold">
                           <CheckCircle2 className="w-4 h-4 text-[#89F8C7]" />
                           <span>
-                            تم إنتاج الفيديو بنجاح ({generatedSizeMb} MB)!
+                            تم تصدير وتنزيل الفيديو بنجاح ({generatedSizeMb} MB)! بدأ التحميل التلقائي إلى جهازك.
                           </span>
                         </div>
 
@@ -423,7 +441,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                             className="px-3 py-1.5 rounded-lg bg-[#292A2E] hover:bg-[#333539] text-xs text-[#C4C7C8] border border-[#36373B] flex items-center gap-1 transition"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
-                            <span>إعادة المعالجة</span>
+                            <span>إعادة التصدير</span>
                           </button>
 
                           <a
@@ -432,7 +450,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                             className="px-5 py-2 rounded-xl bg-[#89F8C7] text-[#002114] text-xs font-bold hover:bg-white transition-all shadow-md flex items-center gap-1.5 active:scale-95"
                           >
                             <Download className="w-4 h-4" />
-                            <span>تنزيل الفيديو الآن</span>
+                            <span>تنزيل الفيديو مجدداً</span>
                           </a>
                         </div>
                       </div>

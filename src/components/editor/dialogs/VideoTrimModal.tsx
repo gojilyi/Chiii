@@ -37,8 +37,6 @@ export const VideoTrimModal: React.FC<VideoTrimModalProps> = ({
   onUpdateDraft,
   onSeek,
 }) => {
-  if (!isOpen) return null;
-
   const totalDuration = draft.duration || 15;
   const [trimStart, setTrimStart] = useState<number>(draft.trimStart || 0);
   const [trimEnd, setTrimEnd] = useState<number>(draft.trimEnd && draft.trimEnd > 0 ? draft.trimEnd : totalDuration);
@@ -149,6 +147,8 @@ export const VideoTrimModal: React.FC<VideoTrimModalProps> = ({
       setTrimEnd(splitTime);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">

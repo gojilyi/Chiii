@@ -362,3 +362,35 @@ export const DEFAULT_TEXT_OVERLAY: TextOverlay = {
   endTime: 15,
   animation: 'fade'
 };
+
+export const DEFAULT_BACKGROUND_ADJUSTMENTS = {
+  brightness: 100,
+  contrast: 100,
+  blur: 0,
+  vignette: 25,
+  overlayDarkness: 0,
+  scale: 1.0,
+  panX: 0,
+  panY: 0,
+  flipHorizontal: false,
+  colorGrade: 'none' as const,
+  showGoldArchFrame: false,
+  bannerOverlay: {
+    enabled: true,
+    headerText: 'شرح كتاب',
+    mainTitle: 'إيصال السالك',
+    subtitle: 'إلى أصول مذهب الإمام مالك',
+    positionY: 25,
+    positionX: 35,
+    scale: 1.0,
+  },
+  bookGraphicOverlay: {
+    enabled: true,
+    title: 'إيصال السالك',
+    author: 'أصول مذهب مالك',
+    positionX: 14,
+    positionY: 72,
+    scale: 1.0,
+  },
+};
+

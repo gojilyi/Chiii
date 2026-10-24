@@ -44,8 +44,6 @@ export const CalligraphyAudioModal: React.FC<CalligraphyAudioModalProps> = ({
   draft,
   onUpdateDraft,
 }) => {
-  if (!isOpen) return null;
-
   const initialConfig = draft.calligraphyStory || {
     enabled: true,
     fontStyle: 'Aref Ruqaa',
@@ -170,6 +168,8 @@ export const CalligraphyAudioModal: React.FC<CalligraphyAudioModalProps> = ({
 
   const srtContent = generateSRT(config.words);
   const assContent = generateASS(config.words, config.fontStyle);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">

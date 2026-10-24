@@ -299,3 +299,56 @@ class AudioEngine {
 }
 
 export const audioEngine = new AudioEngine();
+
+/**
+ * Extracts the real duration in seconds of any audio or video file/blob/URL.
+ * Uses Web Audio API decodeAudioData for highest accuracy, with HTMLMediaElement fallback.
+ * Never caps or restricts the duration.
+ */
+export async function extractMediaDuration(urlOrBlob: string | Blob): Promise<number> {
+  // 1. Try Web Audio decodeAudioData (most accurate and works on mobile)
+  try {
+    let arrayBuffer: ArrayBuffer;
+    if (urlOrBlob instanceof Blob) {
+      arrayBuffer = await urlOrBlob.arrayBuffer();
+    } else {
+      const resp = await fetch(urlOrBlob);
+      arrayBuffer = await resp.arrayBuffer();
+    }
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (AudioCtx) {
+      const audioCtx = new AudioCtx();
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+      const dur = +(decoded.duration).toFixed(2);
+      audioCtx.close().catch(() => {});
+      if (dur > 0 && Number.isFinite(dur)) {
+        return dur;
+      }
+    }
+  } catch (e) {
+    // Might fail for video files or unsupported audio formats, fallback to HTMLMediaElement
+  }
+
+  // 2. Fallback to HTMLAudioElement / HTMLVideoElement onloadedmetadata
+  return new Promise<number>((resolve) => {
+    const isBlob = urlOrBlob instanceof Blob;
+    const url = isBlob ? URL.createObjectURL(urlOrBlob) : urlOrBlob;
+    const isVideo = typeof urlOrBlob === 'string' && /\.(mp4|webm|mov|mkv)$/i.test(urlOrBlob);
+
+    const elem = document.createElement(isVideo ? 'video' : 'audio');
+    elem.preload = 'metadata';
+    if (!url.startsWith('blob:') && !url.startsWith('data:') && url.startsWith('http')) {
+      elem.crossOrigin = 'anonymous';
+    }
+    elem.onloadedmetadata = () => {
+      const d = elem.duration && Number.isFinite(elem.duration) ? +(elem.duration).toFixed(2) : 0;
+      if (isBlob) URL.revokeObjectURL(url);
+      resolve(d);
+    };
+    elem.onerror = () => {
+      if (isBlob) URL.revokeObjectURL(url);
+      resolve(0);
+    };
+    elem.src = url;
+  });
+}

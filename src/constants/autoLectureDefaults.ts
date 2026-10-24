@@ -135,6 +135,28 @@ export const READY_BACKGROUNDS: ReadyBackgroundItem[] = [
     recommendedRatio: '16:9',
     description: 'أعمدة رخامية مذهبة بطراز أندلسي فاخر لشروحات الأصول الفقهية والقواعد المالكية',
   },
+  {
+    id: 'bg_sheikh_portrait',
+    name: 'صورة شخصية للشيخ العيد بالعمامة البيضاء',
+    category: 'iysal_salik',
+    categoryLabel: 'صور الشيخ العيد',
+    assetPath: 'assets/aistudio/IMG_20261022_114507_a14e319a.jpg',
+    imageUrl: '/assets/aistudio/IMG_20261022_114507_a14e319a.jpg',
+    isVideoLoop: false,
+    recommendedRatio: 'all',
+    description: 'صورة بورتريه عالية الدقة للشيخ العيد باللباس التقليدي والعمامة',
+  },
+  {
+    id: 'bg_sheikh_majlis',
+    name: 'الشيخ العيد في مجلس السماع مع المشايخ',
+    category: 'iysal_salik',
+    categoryLabel: 'مجالس وتراث',
+    assetPath: 'assets/backgrounds/media_1792762022021_5efc99ce.jpg',
+    imageUrl: '/assets/backgrounds/media_1792762022021_5efc99ce.jpg',
+    isVideoLoop: false,
+    recommendedRatio: '16:9',
+    description: 'مجلس علم وسماع تراثي للشيخ العيد يرتدي النظارة مع مشايخ العلم',
+  },
   // الخلفيات العامة التراثية
   {
     id: 'bg_mosque_arches',

@@ -47,8 +47,6 @@ export const MediaClipsModal: React.FC<MediaClipsModalProps> = ({
   currentTime,
   onUpdateDraft,
 }) => {
-  if (!isOpen) return null;
-
   const [activeTab, setActiveTab] = useState<'all' | 'video' | 'image' | 'audio'>('all');
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
@@ -155,14 +153,16 @@ export const MediaClipsModal: React.FC<MediaClipsModalProps> = ({
       const tempAudio = new Audio(url);
 
       const finishAdd = (audDuration: number) => {
+        const startPos = Math.max(0, currentTime);
+        const clipEnd = +(startPos + audDuration).toFixed(2);
         const newClip: MediaClip = {
           id: `aud_clip_${Date.now()}`,
           type: 'audio',
           name: file.name.replace(/\.[^/.]+$/, ''),
           url: url,
           duration: audDuration,
-          startTime: Math.min(currentTime, duration - 1),
-          endTime: Math.min(duration, Math.min(currentTime, duration - 1) + audDuration),
+          startTime: startPos,
+          endTime: clipEnd,
           trimStart: 0,
           trimEnd: audDuration,
           volume: 0.9,
@@ -170,7 +170,11 @@ export const MediaClipsModal: React.FC<MediaClipsModalProps> = ({
         };
 
         const updatedClips = [...clips, newClip];
-        const updatedDraft = { ...draft, mediaClips: updatedClips };
+        const updatedDraft = { 
+          ...draft, 
+          mediaClips: updatedClips,
+          duration: Math.max(draft.duration || 0, clipEnd),
+        };
         onUpdateDraft(updatedDraft);
         setSelectedClipId(newClip.id);
         showNotification(`تمت إضافة المسار الصوتي: ${newClip.name}`);
@@ -268,6 +272,8 @@ export const MediaClipsModal: React.FC<MediaClipsModalProps> = ({
     : clips.filter((c) => c.type === activeTab);
 
   const selectedClip = clips.find((c) => c.id === selectedClipId);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">

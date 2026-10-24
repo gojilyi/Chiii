@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Type, Music, Sparkles, VolumeX, Save, Download, PenTool, Film, Scissors } from 'lucide-react';
+import { Type, Music, Sparkles, VolumeX, Save, Download, PenTool, Film, Scissors, Image as ImageIcon } from 'lucide-react';
 
 interface BottomToolbarProps {
   onOpenText: () => void;
@@ -14,6 +14,7 @@ interface BottomToolbarProps {
   onOpenMuteReplace: () => void;
   onOpenCalligraphy: () => void;
   onOpenMedia?: () => void;
+  onOpenBackground?: () => void;
   onSaveDraft: () => void;
   onExport: () => void;
   isMuted: boolean;
@@ -27,13 +28,26 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
   onOpenMuteReplace,
   onOpenCalligraphy,
   onOpenMedia,
+  onOpenBackground,
   onSaveDraft,
   onExport,
   isMuted,
 }) => {
   return (
     <div className="bg-[#1A1C1E] border border-[#2B2C30] rounded-2xl p-2.5 shadow-lg">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-10 gap-2">
+        
+        {/* Button 0: الخلفية والتعديل (Backgrounds & Customizer) */}
+        {onOpenBackground && (
+          <button
+            onClick={onOpenBackground}
+            className="h-12 rounded-xl bg-gradient-to-r from-[#006C4C]/50 to-[#00875F]/40 hover:from-[#006C4C]/70 hover:to-[#00875F]/60 text-white flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-all text-xs font-bold border border-[#89F8C7]/60 active:scale-[0.98] shadow-sm"
+          >
+            <ImageIcon className="w-4 h-4 text-[#89F8C7]" />
+            <span>الخلفية والتعديل</span>
+          </button>
+        )}
+
         
         {/* Button 1: إضافة الوسائط والقص والحذف (Media & Clips) */}
         {onOpenMedia && (

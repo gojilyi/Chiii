@@ -5,7 +5,8 @@
 
 import React, { useRef, useEffect } from 'react';
 import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize2, Sparkles, Scissors } from 'lucide-react';
-import { ProjectDraft } from '../../types';
+import { ProjectDraft, BackgroundAdjustments } from '../../types';
+import { DEFAULT_BACKGROUND_ADJUSTMENTS } from '../../constants/defaults';
 
 interface PreviewPlayerProps {
   draft: ProjectDraft;
@@ -14,6 +15,7 @@ interface PreviewPlayerProps {
   onPlayToggle: () => void;
   onSeek: (time: number) => void;
   onToggleMute: () => void;
+  onLoadedMediaDuration?: (duration: number) => void;
   onSplitAtPlayhead?: () => void;
   onTrimBeforePlayhead?: () => void;
   onTrimAfterPlayhead?: () => void;
@@ -26,6 +28,7 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
   onPlayToggle,
   onSeek,
   onToggleMute,
+  onLoadedMediaDuration,
   onSplitAtPlayhead,
   onTrimBeforePlayhead,
   onTrimAfterPlayhead,
@@ -35,6 +38,13 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
   const videoElementRef = useRef<HTMLVideoElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const clipImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
+
+  // Dynamic project duration: matches the longest audio or video track, never limited to 16s
+  const audioDuration = draft.replacedAudio
+    ? Math.max(0, (draft.replacedAudio.trimEnd || draft.replacedAudio.duration || 0) - (draft.replacedAudio.trimStart || 0))
+    : 0;
+  const mediaClipsMaxEnd = Math.max(0, ...(draft.mediaClips || []).map((c) => c.endTime || 0));
+  const totalDuration = Math.max(draft.duration || 0, audioDuration, mediaClipsMaxEnd, 1);
 
   // Format seconds to mm:ss
   const formatTime = (secs: number) => {
@@ -107,18 +117,42 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
       // Check for subtle zoom (Ken Burns)
       const zoomEffect = draft.effects.find((e) => e.id === 'subtle_zoom' && e.enabled);
       if (zoomEffect) {
-        const zoomScale = 1 + ((currentTime / (draft.duration || 15)) * (zoomEffect.intensity / 100) * 0.08);
+        const zoomScale = 1 + ((currentTime / totalDuration) * (zoomEffect.intensity / 100) * 0.08);
         ctx.translate(dims.width / 2, dims.height / 2);
         ctx.scale(zoomScale, zoomScale);
         ctx.translate(-dims.width / 2, -dims.height / 2);
       }
 
-      // 1. Draw base video or background image
+      // 1. Draw base video or background image with Background Adjustments
       const img = imageElementRef.current;
       const video = videoElementRef.current;
       const isVideoReady = Boolean(video && video.readyState >= 2 && video.videoWidth > 0);
       const isImgReady = Boolean(img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0);
       let drawn = false;
+
+      const bgAdj: BackgroundAdjustments = draft.backgroundAdjustments || { ...DEFAULT_BACKGROUND_ADJUSTMENTS };
+
+      ctx.save();
+
+      // Background Filters (brightness, contrast, blur)
+      let filterParts: string[] = [
+        `brightness(${bgAdj.brightness}%)`,
+        `contrast(${bgAdj.contrast}%)`
+      ];
+      if (bgAdj.blur > 0) {
+        filterParts.push(`blur(${bgAdj.blur}px)`);
+      }
+      ctx.filter = filterParts.join(' ');
+
+      // Pan, Scale, Flip Horizontal
+      const centerX = dims.width / 2;
+      const centerY = dims.height / 2;
+      const panXOffset = (bgAdj.panX / 100) * dims.width;
+      const panYOffset = (bgAdj.panY / 100) * dims.height;
+
+      ctx.translate(centerX + panXOffset, centerY + panYOffset);
+      ctx.scale(bgAdj.scale * (bgAdj.flipHorizontal ? -1 : 1), bgAdj.scale);
+      ctx.translate(-centerX, -centerY);
 
       if (isVideoReady && video) {
         try {
@@ -135,6 +169,9 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
           drawn = false;
         }
       }
+
+      ctx.restore(); // restore filter, pan, scale, flip
+      ctx.filter = 'none';
 
       if (!drawn) {
         const bgGrad = ctx.createLinearGradient(0, 0, 0, dims.height);
@@ -157,10 +194,226 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
         ctx.restore();
       }
 
+      // 1.2. Color Grading Filter
+      if (bgAdj.colorGrade && bgAdj.colorGrade !== 'none') {
+        ctx.save();
+        if (bgAdj.colorGrade === 'warm_gold') {
+          ctx.fillStyle = 'rgba(255, 190, 70, 0.18)';
+          ctx.fillRect(0, 0, dims.width, dims.height);
+        } else if (bgAdj.colorGrade === 'emerald_islamic') {
+          ctx.fillStyle = 'rgba(0, 108, 76, 0.22)';
+          ctx.fillRect(0, 0, dims.width, dims.height);
+        } else if (bgAdj.colorGrade === 'vintage_amber') {
+          ctx.fillStyle = 'rgba(200, 130, 40, 0.22)';
+          ctx.fillRect(0, 0, dims.width, dims.height);
+        } else if (bgAdj.colorGrade === 'serene_blue') {
+          ctx.fillStyle = 'rgba(30, 90, 150, 0.18)';
+          ctx.fillRect(0, 0, dims.width, dims.height);
+        } else if (bgAdj.colorGrade === 'monochrome') {
+          ctx.fillStyle = 'rgba(120, 120, 120, 0.25)';
+          ctx.fillRect(0, 0, dims.width, dims.height);
+        }
+        ctx.restore();
+      }
+
+      // 1.3. Overlay Darkness (Enhances reading for verses)
+      if (bgAdj.overlayDarkness > 0) {
+        ctx.save();
+        ctx.fillStyle = `rgba(0, 0, 0, ${bgAdj.overlayDarkness / 100})`;
+        ctx.fillRect(0, 0, dims.width, dims.height);
+        ctx.restore();
+      }
+
+      // 1.4. Vignette Shadow
+      if (bgAdj.vignette > 0) {
+        ctx.save();
+        const vigGrad = ctx.createRadialGradient(
+          dims.width / 2,
+          dims.height / 2,
+          dims.width * 0.32,
+          dims.width / 2,
+          dims.height / 2,
+          dims.width * 0.72
+        );
+        vigGrad.addColorStop(0, 'transparent');
+        vigGrad.addColorStop(1, `rgba(0, 0, 0, ${(bgAdj.vignette / 100) * 0.85})`);
+        ctx.fillStyle = vigGrad;
+        ctx.fillRect(0, 0, dims.width, dims.height);
+        ctx.restore();
+      }
+
+      // 1.5. Golden Arch Frame
+      if (bgAdj.showGoldArchFrame) {
+        ctx.save();
+        const pad = 16;
+        ctx.strokeStyle = 'rgba(235, 195, 75, 0.85)';
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = 'rgba(255, 215, 0, 0.6)';
+        ctx.shadowBlur = 8;
+        
+        ctx.beginPath();
+        ctx.moveTo(pad, dims.height - pad);
+        ctx.lineTo(pad, pad + 50);
+        ctx.quadraticCurveTo(dims.width / 2, pad - 15, dims.width - pad, pad + 50);
+        ctx.lineTo(dims.width - pad, dims.height - pad);
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(255, 235, 150, 0.45)';
+        ctx.beginPath();
+        ctx.moveTo(pad + 5, dims.height - pad - 5);
+        ctx.lineTo(pad + 5, pad + 54);
+        ctx.quadraticCurveTo(dims.width / 2, pad - 8, dims.width - pad - 5, pad + 54);
+        ctx.lineTo(dims.width - pad - 5, dims.height - pad - 5);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 1.6. Lesson Banner Overlay («شرح كتاب إيصال السالك»)
+      if (bgAdj.bannerOverlay?.enabled) {
+        const b = bgAdj.bannerOverlay;
+        const bScale = b.scale || 1.0;
+        const bx = (b.positionX / 100) * dims.width;
+        const by = (b.positionY / 100) * dims.height;
+
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.scale(bScale, bScale);
+
+        const bannerW = Math.min(dims.width * 0.48, 260);
+        const bannerH = 100;
+        const wHalf = bannerW / 2;
+        const hHalf = bannerH / 2;
+
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+        ctx.shadowBlur = 14;
+        ctx.shadowOffsetY = 4;
+
+        // Arched badge background
+        const bGrad = ctx.createLinearGradient(0, -hHalf, 0, hHalf);
+        bGrad.addColorStop(0, 'rgba(25, 18, 10, 0.88)');
+        bGrad.addColorStop(0.5, 'rgba(15, 11, 7, 0.94)');
+        bGrad.addColorStop(1, 'rgba(8, 6, 4, 0.98)');
+        ctx.fillStyle = bGrad;
+
+        ctx.beginPath();
+        ctx.moveTo(-wHalf, hHalf);
+        ctx.lineTo(-wHalf, -hHalf + 22);
+        ctx.quadraticCurveTo(0, -hHalf - 14, wHalf, -hHalf + 22);
+        ctx.lineTo(wHalf, hHalf);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(229, 184, 66, 0.9)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Inner gold arch
+        ctx.lineWidth = 0.8;
+        ctx.strokeStyle = 'rgba(255, 223, 140, 0.5)';
+        ctx.beginPath();
+        ctx.moveTo(-wHalf + 4, hHalf - 4);
+        ctx.lineTo(-wHalf + 4, -hHalf + 24);
+        ctx.quadraticCurveTo(0, -hHalf - 8, wHalf - 4, -hHalf + 24);
+        ctx.lineTo(wHalf - 4, hHalf - 4);
+        ctx.closePath();
+        ctx.stroke();
+
+        // Text rendering inside banner
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 15px "Cairo", sans-serif';
+        ctx.fillText(b.headerText || 'شرح كتاب', 0, -20);
+
+        ctx.fillStyle = '#FFDF9E';
+        ctx.font = 'bold 26px "Aref Ruqaa", "Amiri", serif';
+        ctx.shadowColor = 'rgba(255, 200, 50, 0.85)';
+        ctx.shadowBlur = 12;
+        ctx.fillText(b.mainTitle || 'إيصال السالك', 0, 8);
+
+        ctx.fillStyle = '#E3E2E6';
+        ctx.font = '600 11px "Cairo", sans-serif';
+        ctx.shadowBlur = 4;
+        ctx.fillText(b.subtitle || 'إلى أصول مذهب الإمام مالك', 0, 32);
+
+        ctx.restore();
+      }
+
+      // 1.7. Book Graphic Overlay (كتاب إيصال السالك الأخضر)
+      if (bgAdj.bookGraphicOverlay?.enabled) {
+        const bk = bgAdj.bookGraphicOverlay;
+        const bkScale = bk.scale || 1.0;
+        const bkx = (bk.positionX / 100) * dims.width;
+        const bky = (bk.positionY / 100) * dims.height;
+
+        ctx.save();
+        ctx.translate(bkx, bky);
+        ctx.scale(bkScale, bkScale);
+        ctx.rotate(-0.1);
+
+        const bookW = 95;
+        const bookH = 138;
+
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+        ctx.shadowBlur = 16;
+        ctx.shadowOffsetX = 6;
+        ctx.shadowOffsetY = 8;
+
+        // Leather cover gradient
+        const coverGrad = ctx.createLinearGradient(-bookW / 2, 0, bookW / 2, 0);
+        coverGrad.addColorStop(0, '#003824');
+        coverGrad.addColorStop(0.2, '#005437');
+        coverGrad.addColorStop(0.85, '#00472e');
+        coverGrad.addColorStop(1, '#002919');
+        ctx.fillStyle = coverGrad;
+
+        ctx.beginPath();
+        ctx.roundRect(-bookW / 2, -bookH / 2, bookW, bookH, [5, 10, 10, 5]);
+        ctx.fill();
+
+        // Pages edge
+        ctx.shadowColor = 'transparent';
+        ctx.fillStyle = '#EDE8DC';
+        ctx.fillRect(bookW / 2 - 4, -bookH / 2 + 5, 4, bookH - 10);
+        ctx.fillRect(-bookW / 2 + 6, bookH / 2 - 4, bookW - 10, 4);
+
+        // Gold border lines
+        ctx.strokeStyle = 'rgba(229, 184, 66, 0.88)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(-bookW / 2 + 6, -bookH / 2 + 6, bookW - 14, bookH - 14);
+
+        ctx.lineWidth = 0.8;
+        ctx.strokeStyle = 'rgba(255, 223, 140, 0.5)';
+        ctx.strokeRect(-bookW / 2 + 10, -bookH / 2 + 10, bookW - 22, bookH - 22);
+
+        // Book title & medallion
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#FFE082';
+        ctx.font = 'bold 15px "Aref Ruqaa", "Amiri", serif';
+        ctx.fillText(bk.title || 'إيصال السالك', 0, -12);
+
+        ctx.fillStyle = '#E0D0FF';
+        ctx.font = '9px "Cairo", sans-serif';
+        ctx.fillText(bk.author || 'أصول مذهب مالك', 0, 8);
+
+        ctx.fillStyle = 'rgba(229, 184, 66, 0.85)';
+        ctx.beginPath();
+        ctx.arc(0, 30, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      }
+
       ctx.restore();
 
       // 2. Render Montage & Spiritual Effects (from YouTube Playlist & Pro Packs)
       const activeEffects = draft.effects.filter((e) => e.enabled);
+
 
       activeEffects.forEach((effect) => {
         // A. Light Leaks & Cinematic Flares (تسريبات ضوئية)
@@ -501,7 +754,7 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
   }, [dims, draft, currentTime]);
 
   return (
-    <div className="flex flex-col items-center bg-[#1A1C1E] rounded-2xl border border-[#2B2C30] p-4 shadow-md relative overflow-hidden">
+    <div className="flex flex-col items-center bg-[#242424] rounded-2xl border border-[#383838] p-3 shadow-xl relative overflow-hidden">
       
       {/* Hidden reference media elements */}
       <img
@@ -514,42 +767,43 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
         ref={videoElementRef}
         src={draft.videoSourceUrl}
         className="hidden"
+        onLoadedMetadata={(e) => {
+          const dur = e.currentTarget.duration;
+          if (dur && Number.isFinite(dur) && dur > 0 && onLoadedMediaDuration) {
+            onLoadedMediaDuration(+dur.toFixed(2));
+          }
+        }}
       />
 
       {/* Top Status Bar inside Player */}
-      <div className="w-full flex items-center justify-between pb-3 px-1 text-xs text-[#8E9192]">
+      <div className="w-full flex items-center justify-between pb-2 px-1 text-xs text-[#A0A0A0]">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[#89F8C7] bg-[#121316] px-2 py-0.5 rounded border border-[#2B2C30]">
+          <span className="font-mono text-[#F5B800] bg-[#1a1a1a] px-2 py-0.5 rounded-md border border-[#383838] font-bold">
             {draft.aspectRatio}
           </span>
-          <span className="truncate max-w-[200px] text-[#E3E2E6] font-medium">
-            {draft.videoSourceName}
+          <span className="truncate max-w-[200px] text-[#E0E0E0] font-medium text-xs">
+            {draft.videoSourceName || 'المعاينة الحية'}
           </span>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-[#89F8C7] bg-[#121316] px-2 py-0.5 rounded border border-[#2B2C30]">
-            <Sparkles className="w-3 h-3 text-[#FFDF9E]" />
-            <span>مؤثرات المونتاج مفعّلة ({draft.effects.filter(e => e.enabled).length})</span>
-          </span>
-
           <button
             onClick={onToggleMute}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+            className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-semibold transition ${
               draft.muteOriginalAudio
                 ? 'bg-amber-950/40 text-amber-300 border border-amber-600/40'
-                : 'bg-[#292A2E] text-[#C4C7C8] hover:text-white border border-[#36373B]'
+                : 'bg-[#333333] text-[#A0A0A0] hover:text-white border border-[#444444]'
             }`}
           >
             {draft.muteOriginalAudio ? (
               <>
                 <VolumeX className="w-3.5 h-3.5 text-amber-400" />
-                <span>الصوت الأصلي مكتوم</span>
+                <span className="text-[10px]">مكتوم</span>
               </>
             ) : (
               <>
-                <Volume2 className="w-3.5 h-3.5 text-[#89F8C7]" />
-                <span>الصوت الأصلي مفعّل</span>
+                <Volume2 className="w-3.5 h-3.5 text-[#F5B800]" />
+                <span className="text-[10px]">الصوت</span>
               </>
             )}
           </button>
@@ -558,11 +812,11 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
 
       {/* Screen Aspect Ratio Frame */}
       <div 
-        className="relative bg-black rounded-xl overflow-hidden flex items-center justify-center border border-[#333539] shadow-inner"
+        className="relative bg-black rounded-xl overflow-hidden flex items-center justify-center border border-[#383838] shadow-2xl"
         style={{
-          width: draft.aspectRatio === '9:16' ? '280px' : draft.aspectRatio === '16:9' ? '520px' : '360px',
+          width: draft.aspectRatio === '9:16' ? '280px' : draft.aspectRatio === '16:9' ? '500px' : '340px',
           maxWidth: '100%',
-          height: draft.aspectRatio === '9:16' ? '498px' : draft.aspectRatio === '16:9' ? '292px' : '360px',
+          height: draft.aspectRatio === '9:16' ? '460px' : draft.aspectRatio === '16:9' ? '280px' : '340px',
         }}
       >
         <canvas
@@ -579,7 +833,7 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
             onClick={onPlayToggle}
             className="absolute inset-0 bg-black/25 flex items-center justify-center cursor-pointer group"
           >
-            <div className="w-14 h-14 rounded-full bg-[#006C4C]/90 text-white flex items-center justify-center shadow-lg border border-[#89F8C7]/40 group-hover:scale-110 transition-transform">
+            <div className="w-14 h-14 rounded-full bg-[#F5B800] text-black flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform font-bold">
               <Play className="w-6 h-6 fill-current translate-x-0.5" />
             </div>
           </div>
@@ -587,47 +841,47 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
       </div>
 
       {/* Bottom Transport Controls Bar */}
-      <div className="w-full mt-3 space-y-2">
+      <div className="w-full mt-2.5 space-y-1.5">
         <div className="relative flex items-center gap-3">
-          <span className="text-xs font-mono text-[#89F8C7] tabular-nums">
+          <span className="text-xs font-mono text-[#F5B800] tabular-nums font-bold">
             {formatTime(currentTime)}
           </span>
           <input
             type="range"
             min="0"
-            max={draft.duration || 15}
+            max={totalDuration}
             step="0.1"
             value={currentTime}
             onChange={(e) => onSeek(parseFloat(e.target.value))}
-            className="flex-1 accent-[#89F8C7] cursor-pointer h-1.5 bg-[#2B2C30] rounded-lg"
+            className="flex-1 accent-[#F5B800] cursor-pointer h-1.5 bg-[#333333] rounded-lg"
           />
-          <span className="text-xs font-mono text-[#8E9192] tabular-nums">
-            {formatTime(draft.duration || 15)}
+          <span className="text-xs font-mono text-[#A0A0A0] tabular-nums">
+            {formatTime(totalDuration)}
           </span>
         </div>
 
-        <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center justify-between pt-0.5">
           <div className="flex items-center gap-2">
             <button
               onClick={() => onSeek(0)}
               title="إعادة من البداية"
-              className="w-8 h-8 rounded-lg bg-[#292A2E] hover:bg-[#333539] text-[#C4C7C8] hover:text-white flex items-center justify-center transition-colors"
+              className="w-8 h-8 rounded-lg bg-[#333333] hover:bg-[#404040] text-[#C4C7C8] hover:text-white flex items-center justify-center transition border border-[#444444]"
             >
               <RotateCcw className="w-4 h-4" />
             </button>
             <button
               onClick={onPlayToggle}
-              className="h-8 px-4 rounded-lg bg-[#006C4C] hover:bg-[#00573c] text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+              className="h-9 px-4 rounded-xl bg-[#F5B800] hover:bg-[#e0a800] text-black text-xs font-bold flex items-center gap-1.5 transition shadow-sm active:scale-95"
             >
               {isPlaying ? (
                 <>
                   <Pause className="w-4 h-4 fill-current" />
-                  <span>إيقاف مؤقت</span>
+                  <span>إيقاف</span>
                 </>
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-current" />
-                  <span>تشغيل المعاينة</span>
+                  <span>تشغيل</span>
                 </>
               )}
             </button>
@@ -654,7 +908,7 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
               </button>
             )}
 
-            {onTrimAfterPlayhead && currentTime < (draft.duration || 15) - 0.5 && (
+            {onTrimAfterPlayhead && currentTime < totalDuration - 0.5 && (
               <button
                 onClick={onTrimAfterPlayhead}
                 title="حذف ما بعد المؤشر"

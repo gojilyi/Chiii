@@ -19,14 +19,23 @@ import {
   Image as ImageIcon,
   ChevronLeft,
   ChevronRight,
-  Clock
+  Clock,
+  Layers,
+  Sparkle
 } from 'lucide-react';
-import { ProjectDraft, MediaClip } from '../../types';
+import { ProjectDraft, MediaClip, TextOverlay } from '../../types';
+
+export interface SelectedTimelineItem {
+  type: 'video' | 'text' | 'audio' | 'clip';
+  id: string;
+}
 
 interface TimelineProps {
   draft: ProjectDraft;
   currentTime: number;
   onSeek: (time: number) => void;
+  selectedItem?: SelectedTimelineItem | null;
+  onSelectItem?: (item: SelectedTimelineItem | null) => void;
   onOpenTextModal: () => void;
   onOpenAudioModal: () => void;
   onOpenEffectsModal: () => void;
@@ -38,12 +47,15 @@ interface TimelineProps {
   onTrimBeforePlayhead?: () => void;
   onTrimAfterPlayhead?: () => void;
   onDeleteClip?: (id: string) => void;
+  onTrimItemDirect?: (type: 'video' | 'text' | 'audio' | 'clip', id: string, newStart: number, newEnd: number) => void;
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
   draft,
   currentTime,
   onSeek,
+  selectedItem = null,
+  onSelectItem,
   onOpenTextModal,
   onOpenAudioModal,
   onOpenEffectsModal,
@@ -55,13 +67,20 @@ export const Timeline: React.FC<TimelineProps> = ({
   onTrimBeforePlayhead,
   onTrimAfterPlayhead,
   onDeleteClip,
+  onTrimItemDirect,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
   const [splitNotice, setSplitNotice] = useState<string | null>(null);
 
-  const duration = Math.max(1, draft.duration || 15);
+  // Dynamic timeline duration: strictly matches the longest audio or video track
+  const audioDuration = draft.replacedAudio
+    ? Math.max(0, (draft.replacedAudio.trimEnd || draft.replacedAudio.duration || 0) - (draft.replacedAudio.trimStart || 0))
+    : 0;
+  const mediaClipsMaxEnd = Math.max(0, ...(draft.mediaClips || []).map((c) => c.endTime || 0));
+  const textOverlaysMaxEnd = Math.max(0, ...(draft.textOverlays || []).map((t) => t.endTime || 0));
+  const duration = Math.max(draft.duration || 0, audioDuration, mediaClipsMaxEnd, textOverlaysMaxEnd, 1);
 
   // Percentage of playhead position
   const playheadPercent = Math.min(100, Math.max(0, (currentTime / duration) * 100));
@@ -78,7 +97,6 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   // Handle drag / scrubbing on timeline
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Only respond to primary left click
     if (e.button !== 0) return;
     setIsScrubbing(true);
     calculateSeekTime(e.clientX);
@@ -137,7 +155,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     if (e) e.stopPropagation();
     if (onSplitAtPlayhead) {
       onSplitAtPlayhead();
-      setSplitNotice(`تم قص وتقسيم الفيديو بنجاح عند ${currentTime.toFixed(1)} ثانية ✂️`);
+      setSplitNotice(`تم تقسيم المقطع بنجاح عند ${currentTime.toFixed(1)} ثانية ✂️`);
     } else {
       setSplitNotice(`تم تحديد نقطة قص عند ${currentTime.toFixed(1)} ثانية`);
     }
@@ -153,7 +171,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     }
     if (onTrimBeforePlayhead) {
       onTrimBeforePlayhead();
-      setSplitNotice(`تم حذف المقطع ما قبل ${currentTime.toFixed(1)} ثانية بنجاح ✂️`);
+      setSplitNotice(`تم قص ما قبل ${currentTime.toFixed(1)}s بنجاح ✂️`);
       setTimeout(() => setSplitNotice(null), 3000);
     }
   };
@@ -167,209 +185,192 @@ export const Timeline: React.FC<TimelineProps> = ({
     }
     if (onTrimAfterPlayhead) {
       onTrimAfterPlayhead();
-      setSplitNotice(`تم إنهاء وقص الفيديو عند ${currentTime.toFixed(1)} ثانية ✂️`);
+      setSplitNotice(`تم قص ما بعد ${currentTime.toFixed(1)}s بنجاح ✂️`);
       setTimeout(() => setSplitNotice(null), 3000);
     }
   };
 
+  // Check selection
+  const isVideoSelected = selectedItem?.type === 'video';
+  const isAudioSelected = selectedItem?.type === 'audio';
+
   return (
-    <div className="bg-[#1A1C1E] rounded-2xl border border-[#2B2C30] p-4 space-y-3 shadow-md select-none">
+    <div className="bg-[#242424] rounded-2xl border border-[#383838] p-3 space-y-2.5 shadow-xl select-none text-[#E3E2E6]">
       {splitNotice && (
-        <div className="p-2.5 bg-[#006C4C]/40 border border-[#89F8C7]/50 rounded-xl text-xs text-[#89F8C7] text-center font-medium shadow flex items-center justify-center gap-2 animate-in fade-in">
-          <Scissors className="w-4 h-4 text-[#89F8C7]" />
+        <div className="p-2 bg-[#F5B800]/20 border border-[#F5B800]/50 rounded-xl text-xs text-[#F5B800] text-center font-bold shadow flex items-center justify-center gap-2 animate-in fade-in">
+          <Scissors className="w-4 h-4 text-[#F5B800]" />
           <span>{splitNotice}</span>
         </div>
       )}
 
-      {/* Timeline Controls Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[#8E9192] border-b border-[#2B2C30] pb-3">
-        <div className="flex items-center gap-2.5">
-          <span className="font-semibold text-[#E3E2E6] flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#006C4C] animate-pulse"></span>
-            <span>الشريط الزمني وقص المؤشر</span>
-          </span>
-          <span className="font-mono text-[#89F8C7] bg-[#121316] px-2.5 py-1 rounded-lg border border-[#2B2C30] text-xs font-bold">
+      {/* KineMaster Style Timeline Toolbar Header */}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#A0A0A0] pb-2 border-b border-[#333333]">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[#F5B800] bg-[#1a1a1a] px-2.5 py-1 rounded-lg border border-[#383838] font-bold text-xs">
             {currentTime.toFixed(1)}s / {duration.toFixed(1)}s
           </span>
-        </div>
 
-        {/* Playhead Scissors Actions Group */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {/* Main Cut / Split at Playhead button */}
-          <button
-            onClick={handleSplit}
-            title={`قص وفصل الفيديو إلى جزئين عند موضع المؤشر (${currentTime.toFixed(1)} ثانية)`}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-red-600/90 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold transition-all shadow-md active:scale-95 border border-red-400/40"
-          >
-            <Scissors className="w-3.5 h-3.5" />
-            <span>قص وتقسيم بالمؤشر ({currentTime.toFixed(1)}s)</span>
-          </button>
-
-          {/* Trim before playhead button */}
-          {onTrimBeforePlayhead && (
+          <div className="flex items-center bg-[#1a1a1a] rounded-lg border border-[#383838] p-0.5">
             <button
-              onClick={handleTrimBefore}
-              title={`حذف الجزء الموجود قبل المؤشر (0s إلى ${currentTime.toFixed(1)}s)`}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#292A2E] hover:bg-[#333539] text-[#C4C7C8] hover:text-white transition-colors border border-[#36373B] text-[11px]"
-            >
-              <ChevronLeft className="w-3.5 h-3.5 text-amber-400" />
-              <span>قص ما قبله</span>
-            </button>
-          )}
-
-          {/* Trim after playhead button */}
-          {onTrimAfterPlayhead && (
-            <button
-              onClick={handleTrimAfter}
-              title={`حذف الجزء الموجود بعد المؤشر (${currentTime.toFixed(1)}s إلى نهاية الفيديو)`}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#292A2E] hover:bg-[#333539] text-[#C4C7C8] hover:text-white transition-colors border border-[#36373B] text-[11px]"
-            >
-              <span>قص ما بعده</span>
-              <ChevronRight className="w-3.5 h-3.5 text-amber-400" />
-            </button>
-          )}
-
-          {/* Easy Audio Trimmer Modal Button */}
-          {onOpenAudioTrimModal && (
-            <button
-              onClick={onOpenAudioTrimModal}
-              title="قص وتحديد بداية ونهاية تسجيل الشيخ بدقة وسهولة"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 text-[#89F8C7] font-semibold transition-colors border border-emerald-500/40 text-[11px] shadow-sm"
-            >
-              <Scissors className="w-3.5 h-3.5 text-[#89F8C7]" />
-              <span>مقص الصوت السهل</span>
-            </button>
-          )}
-
-          {/* Sync Video Duration to Audio Button */}
-          {onSyncDurationToAudio && draft.replacedAudio && (
-            <button
-              onClick={onSyncDurationToAudio}
-              title="جعل مدة الفيديو مطابقة تماماً لوقت الصوت المختار"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#006C4C]/40 hover:bg-[#006C4C]/70 text-[#89F8C7] font-semibold transition-colors border border-[#89F8C7]/40 text-[11px] shadow-sm"
-            >
-              <Clock className="w-3.5 h-3.5" />
-              <span>الفيديو حسب وقت الصوت</span>
-            </button>
-          )}
-
-          {/* Advanced Trimming Modal Button */}
-          {onOpenTrimModal && (
-            <button
-              onClick={onOpenTrimModal}
-              title="فتح لوحة القص والتعديل الدقيقة"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#006C4C]/30 hover:bg-[#006C4C]/50 text-[#89F8C7] font-medium transition-colors border border-[#006C4C]/60 text-[11px]"
-            >
-              <Clock className="w-3.5 h-3.5" />
-              <span>لوحة القص</span>
-            </button>
-          )}
-
-          {/* Media clips modal button */}
-          {onOpenMediaModal && (
-            <button
-              onClick={onOpenMediaModal}
-              title="إدارة الوسائط والطبقات"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#202226] hover:bg-[#2B2C30] text-[#E3E2E6] font-medium transition-colors border border-[#36373B] text-[11px]"
-            >
-              <Plus className="w-3.5 h-3.5 text-[#89F8C7]" />
-              <span>الوسائط</span>
-            </button>
-          )}
-
-          {/* Zoom controls */}
-          <div className="flex items-center bg-[#292A2E] rounded-xl p-0.5 border border-[#36373B] ml-1">
-            <button
-              onClick={() => setZoomLevel((z) => Math.max(0.75, z - 0.25))}
-              className="p-1 text-[#8E9192] hover:text-white transition-colors"
-              title="تصغير الشريط"
+              onClick={() => setZoomLevel((prev) => Math.max(0.6, prev - 0.2))}
+              className="p-1 text-[#A0A0A0] hover:text-[#F5B800] transition"
+              title="تصغير المسار"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="text-[10px] font-mono px-1.5 text-[#C4C7C8]">
-              {Math.round(zoomLevel * 100)}%
-            </span>
+            <span className="text-[10px] font-mono px-1.5 text-[#E0E0E0]">{Math.round(zoomLevel * 100)}%</span>
             <button
-              onClick={() => setZoomLevel((z) => Math.min(2, z + 0.25))}
-              className="p-1 text-[#8E9192] hover:text-white transition-colors"
-              title="تكبير الشريط"
+              onClick={() => setZoomLevel((prev) => Math.min(2.5, prev + 0.2))}
+              className="p-1 text-[#A0A0A0] hover:text-[#F5B800] transition"
+              title="تكبير المسار"
             >
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
+
+        {/* Quick Scissors Actions */}
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleSplit}
+            title="تقسيم المقطع عند المؤشر"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#333333] hover:bg-[#404040] text-[#F5B800] hover:text-white border border-[#484848] text-xs font-bold transition shadow-sm active:scale-95"
+          >
+            <Scissors className="w-3.5 h-3.5" />
+            <span>تقسيم (Split)</span>
+          </button>
+
+          {onTrimBeforePlayhead && (
+            <button
+              onClick={handleTrimBefore}
+              title="حذف ما قبل المؤشر"
+              className="p-1.5 rounded-lg bg-[#333333] hover:bg-[#404040] text-[#E0E0E0] border border-[#484848] transition active:scale-95"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 text-[#F5B800]" />
+            </button>
+          )}
+
+          {onTrimAfterPlayhead && (
+            <button
+              onClick={handleTrimAfter}
+              title="حذف ما بعد المؤشر"
+              className="p-1.5 rounded-lg bg-[#333333] hover:bg-[#404040] text-[#E0E0E0] border border-[#484848] transition active:scale-95"
+            >
+              <ChevronRight className="w-3.5 h-3.5 text-[#F5B800]" />
+            </button>
+          )}
+
+          {onOpenAudioTrimModal && (
+            <button
+              onClick={onOpenAudioTrimModal}
+              title="فتح مقص الصوت السهل"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-[#2a2a2a] hover:bg-[#383838] text-[#89F8C7] border border-emerald-500/30 text-xs font-semibold transition"
+            >
+              <Music className="w-3 h-3 text-[#89F8C7]" />
+              <span>مقص الصوت</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Interactive Timeline Tracks Viewport */}
+      {/* KineMaster Style Timeline Tracks Area */}
       <div 
         ref={containerRef}
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        className={`relative bg-[#121316] rounded-xl border border-[#2B2C30] overflow-x-auto select-none pt-8 pb-3 px-2 ${
+        className={`relative bg-[#1a1a1a] rounded-xl border border-[#333333] overflow-x-auto select-none pt-8 pb-3 px-2 ${
           isScrubbing ? 'cursor-grabbing' : 'cursor-pointer'
         }`}
-        style={{ minHeight: '235px' }}
+        style={{ minHeight: '230px' }}
       >
         {/* Time ruler on top */}
-        <div className="absolute top-0 left-0 right-0 h-7 bg-[#17191C] border-b border-[#2B2C30] flex items-center px-2 pointer-events-none">
+        <div className="absolute top-0 left-0 right-0 h-7 bg-[#202020] border-b border-[#383838] flex items-center px-2 pointer-events-none">
           {markers.map((sec) => (
             <div
               key={sec}
-              className="absolute text-[10px] font-mono text-[#8E9192] flex flex-col items-center -translate-x-1/2"
+              className="absolute text-[10px] font-mono text-[#888888] flex flex-col items-center -translate-x-1/2"
               style={{ left: `${(sec / duration) * 100}%` }}
             >
               <span>{sec}s</span>
-              <div className="w-[1px] h-1.5 bg-[#36373B] mt-0.5" />
+              <div className="w-[1px] h-1.5 bg-[#444444] mt-0.5" />
             </div>
           ))}
         </div>
 
-        {/* Tracks Container */}
-        <div className="space-y-2.5 mt-1 pointer-events-auto">
+        {/* Tracks List */}
+        <div className="space-y-2 mt-1 pointer-events-auto">
           
-          {/* TRACK 1: Video & Visual Clips Track */}
+          {/* TRACK 1: MAIN VIDEO TRACK (Filmstrip Thumbnail Cards) */}
           <div className="flex items-center gap-2 group">
             <div 
               onClick={(e) => {
                 e.stopPropagation();
-                onOpenMediaModal?.();
+                onSelectItem?.({ type: 'video', id: 'main_video' });
               }}
-              className="w-24 shrink-0 flex items-center gap-1.5 text-[11px] font-medium text-[#C4C7C8] cursor-pointer hover:text-[#89F8C7]"
+              className="w-20 shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-[#E0E0E0] cursor-pointer hover:text-[#F5B800]"
             >
-              <Film className="w-3.5 h-3.5 text-[#89F8C7]" />
-              <span className="truncate">فيديو وقص</span>
+              <Film className="w-3.5 h-3.5 text-[#F5B800]" />
+              <span className="truncate">الفيديو</span>
             </div>
             
-            <div className="flex-1 h-13 bg-[#1A1C1E] rounded-lg border border-[#2B2C30] relative overflow-hidden flex items-center p-1 min-h-[48px]">
+            <div className="flex-1 h-14 bg-[#262626] rounded-xl border border-[#383838] relative overflow-hidden flex items-center p-0.5">
               
-              {/* If no split media clips exist, show the base video segment */}
+              {/* If no split media clips exist, show base video card with filmstrip styling */}
               {visualClips.length === 0 ? (
                 <div 
-                  className="w-full h-full bg-gradient-to-r from-[#006C4C]/60 via-[#00875F]/50 to-[#006C4C]/60 border border-[#89F8C7]/50 rounded-md flex items-center justify-between px-3 text-xs shadow-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectItem?.({ type: 'video', id: 'main_video' });
+                  }}
+                  className={`w-full h-full rounded-lg relative overflow-hidden flex items-center justify-between px-3 text-xs transition-all cursor-pointer ${
+                    isVideoSelected 
+                      ? 'border-2 border-[#F5B800] bg-[#332b14] shadow-md' 
+                      : 'border border-[#444444] bg-[#2a2a2a] hover:border-[#555555]'
+                  }`}
                 >
-                  <div className="flex items-center gap-2 truncate">
-                    <Film className="w-3.5 h-3.5 text-[#89F8C7] shrink-0" />
-                    <span className="font-semibold text-white truncate">
-                      {draft.videoSourceName || 'مقطع الفيديو الأساسي'}
+                  {/* KineMaster Yellow Trimming Handles when selected */}
+                  {isVideoSelected && (
+                    <>
+                      <div className="absolute left-0 inset-y-0 w-2.5 bg-[#F5B800] flex items-center justify-center cursor-ew-resize z-10 rounded-l">
+                        <div className="w-0.5 h-4 bg-black/70 rounded-full" />
+                      </div>
+                      <div className="absolute right-0 inset-y-0 w-2.5 bg-[#F5B800] flex items-center justify-center cursor-ew-resize z-10 rounded-r">
+                        <div className="w-0.5 h-4 bg-black/70 rounded-full" />
+                      </div>
+                    </>
+                  )}
+
+                  {/* Filmstrip thumbnails preview simulation */}
+                  <div className="absolute inset-0 opacity-20 pointer-events-none flex overflow-hidden">
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <div 
+                        key={i} 
+                        className="h-full w-14 shrink-0 border-r border-black/50 bg-cover bg-center"
+                        style={{ backgroundImage: `url(${draft.videoSourceUrl || draft.thumbnailUrl || ''})` }}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="relative z-0 flex items-center gap-2 truncate">
+                    <Film className="w-3.5 h-3.5 text-[#F5B800] shrink-0" />
+                    <span className="font-bold text-white truncate">
+                      {draft.videoSourceName || 'الفيديو الأساسي'}
                     </span>
-                    <span className="text-[10px] font-mono text-[#89F8C7] bg-black/40 px-2 py-0.5 rounded border border-[#89F8C7]/30">
+                    <span className="text-[10px] font-mono text-[#F5B800] bg-black/50 px-2 py-0.5 rounded border border-[#F5B800]/40">
                       {duration.toFixed(1)}s
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[10px] text-[#89F8C7] font-medium hidden sm:inline">
-                      (حرّك المؤشر وانقر ✂️ للقص)
-                    </span>
+                  <div className="relative z-0 flex items-center gap-2 shrink-0">
                     {onOpenMediaModal && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpenMediaModal();
                         }}
-                        className="text-[10px] bg-black/50 hover:bg-black/80 text-[#89F8C7] px-2 py-1 rounded border border-[#89F8C7]/40"
+                        className="text-[10px] bg-black/60 hover:bg-black/90 text-[#F5B800] px-2.5 py-1 rounded-lg border border-[#F5B800]/40 font-bold"
                       >
                         + وسائط
                       </button>
@@ -377,42 +378,47 @@ export const Timeline: React.FC<TimelineProps> = ({
                   </div>
                 </div>
               ) : (
-                /* Split clips rendered side-by-side with proportional widths */
+                /* Multiple visual clips */
                 visualClips.map((clip, idx) => {
                   const clipStart = Math.max(0, clip.startTime);
                   const clipEnd = Math.min(duration, clip.endTime);
                   const clipDur = Math.max(0.1, clipEnd - clipStart);
                   const startPct = (clipStart / duration) * 100;
                   const widthPct = Math.max(4, (clipDur / duration) * 100);
-
-                  // Distinguish segments with alternating color styles
-                  const isEven = idx % 2 === 0;
-                  const bgStyle = isEven 
-                    ? 'bg-gradient-to-r from-emerald-900/80 to-teal-900/80 border-emerald-400/80 text-emerald-100'
-                    : 'bg-gradient-to-r from-blue-900/80 to-indigo-900/80 border-blue-400/80 text-blue-100';
+                  const isSelected = selectedItem?.type === 'clip' && selectedItem?.id === clip.id;
 
                   return (
                     <div
                       key={clip.id}
                       onClick={(e) => {
                         e.stopPropagation();
+                        onSelectItem?.({ type: 'clip', id: clip.id });
                         onSeek(clipStart);
                       }}
-                      className={`absolute inset-y-1 rounded-md border flex items-center justify-between px-2 text-[11px] truncate shadow-md transition-all hover:brightness-110 ${bgStyle}`}
+                      className={`absolute inset-y-0.5 rounded-lg flex items-center justify-between px-2 text-[11px] truncate shadow transition-all cursor-pointer ${
+                        isSelected 
+                          ? 'border-2 border-[#F5B800] bg-[#3a3014] z-10' 
+                          : 'border border-[#444444] bg-[#2d2d2d] hover:bg-[#333333]'
+                      }`}
                       style={{ 
                         left: `${startPct}%`, 
                         width: `calc(${widthPct}% - 2px)`,
                       }}
                       title={`${clip.name} (${clipStart.toFixed(1)}s - ${clipEnd.toFixed(1)}s)`}
                     >
+                      {isSelected && (
+                        <>
+                          <div className="absolute left-0 inset-y-0 w-2 bg-[#F5B800] rounded-l cursor-ew-resize" />
+                          <div className="absolute right-0 inset-y-0 w-2 bg-[#F5B800] rounded-r cursor-ew-resize" />
+                        </>
+                      )}
+
                       <div className="flex items-center gap-1.5 truncate">
-                        <span className="w-4 h-4 rounded-full bg-black/40 flex items-center justify-center text-[9px] font-bold shrink-0">
+                        <span className="w-4 h-4 rounded-full bg-black/50 flex items-center justify-center text-[9px] font-bold text-[#F5B800] shrink-0">
                           {idx + 1}
                         </span>
-                        <span className="font-semibold truncate">{clip.name}</span>
-                        <span className="text-[9px] font-mono opacity-80 shrink-0">
-                          [{clipDur.toFixed(1)}s]
-                        </span>
+                        <span className="font-bold text-white truncate">{clip.name}</span>
+                        <span className="text-[9px] font-mono text-[#A0A0A0]">[{clipDur.toFixed(1)}s]</span>
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
@@ -422,8 +428,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                               e.stopPropagation();
                               onDeleteClip(clip.id);
                             }}
-                            title="حذف هذا الجزء المقصوص"
-                            className="w-5 h-5 rounded hover:bg-black/60 flex items-center justify-center text-red-300 hover:text-red-200"
+                            title="حذف هذا المقطع"
+                            className="w-5 h-5 rounded hover:bg-black/60 flex items-center justify-center text-red-400 hover:text-red-300"
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -434,252 +440,182 @@ export const Timeline: React.FC<TimelineProps> = ({
                 })
               )}
             </div>
+
+            {onOpenMediaModal && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenMediaModal();
+                }}
+                className="w-11 h-14 rounded-xl bg-[#2a2a2a] hover:bg-[#383838] border border-dashed border-[#F5B800]/60 hover:border-[#F5B800] text-[#F5B800] flex flex-col items-center justify-center shrink-0 transition active:scale-95 shadow-sm"
+                title="إضافة مقطع فيديو جديد (+)"
+              >
+                <Plus className="w-5 h-5" />
+                <span className="text-[9px] font-bold mt-0.5">+ مقطع</span>
+              </button>
+            )}
           </div>
 
-          {/* TRACK 2: Original Audio Track */}
-          <div className="flex items-center gap-2 group">
-            <div className="w-24 shrink-0 flex items-center gap-1.5 text-[11px] font-medium text-[#C4C7C8]">
-              {draft.muteOriginalAudio ? (
-                <VolumeX className="w-3.5 h-3.5 text-amber-400" />
-              ) : (
-                <Volume2 className="w-3.5 h-3.5 text-[#89F8C7]" />
-              )}
-              <span className={draft.muteOriginalAudio ? 'text-amber-300' : ''}>صوت أصلي</span>
-            </div>
-            <div className="flex-1 h-9 bg-[#1A1C1E] rounded-lg border border-[#2B2C30] relative overflow-hidden flex items-center px-3">
-              {draft.muteOriginalAudio ? (
-                <div className="w-full flex items-center justify-between text-[11px] text-amber-400/90 font-medium bg-amber-950/20 px-2 py-1 rounded">
-                  <span>تم كتم الصوت الأصلي بالكامل (-an)</span>
-                  <span className="text-[10px] bg-amber-900/40 px-1.5 rounded">صامت</span>
-                </div>
-              ) : (
-                <div className="w-full flex items-center gap-1 opacity-70">
-                  {/* Stylized waveform bars */}
-                  {Array.from({ length: 48 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className="flex-1 bg-[#89F8C7] rounded-full"
-                      style={{
-                        height: `${Math.sin(i * 0.4) * 12 + 14}px`,
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* TRACK 3: Audio & الشيخ العيد Tracks */}
+          {/* TRACK 2: LAYERS - TEXT OVERLAYS TRACK */}
           <div className="flex items-center gap-2 group">
             <div 
               onClick={(e) => {
                 e.stopPropagation();
+                onOpenTextModal();
+              }}
+              className="w-20 shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-[#E0E0E0] cursor-pointer hover:text-[#F5B800]"
+            >
+              <Type className="w-3.5 h-3.5 text-[#FFDF9E]" />
+              <span className="truncate">النصوص</span>
+            </div>
+
+            <div 
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenTextModal();
+              }}
+              className="flex-1 h-9 bg-[#262626] rounded-xl border border-[#383838] relative overflow-hidden flex items-center px-1"
+            >
+              {draft.textOverlays.length === 0 ? (
+                <div className="text-[11px] text-[#777777] italic px-2 flex items-center justify-between w-full">
+                  <span>+ إضافة نص أو آية قرآنية (طبقة نصية)</span>
+                  <span className="text-[10px] text-[#F5B800] font-bold bg-[#F5B800]/10 px-2 py-0.5 rounded">
+                    + نص
+                  </span>
+                </div>
+              ) : (
+                draft.textOverlays.map((overlay: TextOverlay) => {
+                  const startPct = Math.max(0, (overlay.startTime / duration) * 100);
+                  const endPct = Math.min(100, (overlay.endTime / duration) * 100);
+                  const widthPct = Math.max(5, endPct - startPct);
+                  const isSelected = selectedItem?.type === 'text' && selectedItem?.id === overlay.id;
+
+                  return (
+                    <div
+                      key={overlay.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectItem?.({ type: 'text', id: overlay.id });
+                        onSeek(overlay.startTime);
+                      }}
+                      className={`absolute inset-y-1 rounded-md flex items-center justify-between px-2 text-[10px] font-bold truncate shadow transition cursor-pointer ${
+                        isSelected
+                          ? 'border-2 border-[#F5B800] bg-[#423512] text-[#FFDF9E] z-10'
+                          : 'border border-amber-600/40 bg-[#332a18] text-amber-200 hover:brightness-110'
+                      }`}
+                      style={{ left: `${startPct}%`, width: `${widthPct}%` }}
+                    >
+                      {isSelected && (
+                        <>
+                          <div className="absolute left-0 inset-y-0 w-1.5 bg-[#F5B800] rounded-l" />
+                          <div className="absolute right-0 inset-y-0 w-1.5 bg-[#F5B800] rounded-r" />
+                        </>
+                      )}
+                      <span className="truncate">{overlay.hasAyahBrackets ? `﴿ ${overlay.text} ﴾` : overlay.text}</span>
+                      <span className="text-[9px] opacity-75 font-mono ml-1">({(overlay.endTime - overlay.startTime).toFixed(1)}s)</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* TRACK 3: AUDIO TRACK (Waveform & Sheikh Recording) */}
+          <div className="flex items-center gap-2 group">
+            <div 
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectItem?.({ type: 'audio', id: 'main_audio' });
                 onOpenAudioModal();
               }}
-              className="w-24 shrink-0 flex items-center gap-1.5 text-[11px] font-medium text-[#C4C7C8] cursor-pointer hover:text-[#89F8C7]"
+              className="w-20 shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-[#E0E0E0] cursor-pointer hover:text-[#89F8C7]"
             >
               <Music className="w-3.5 h-3.5 text-[#89F8C7]" />
-              <span className="truncate">صوتيات وبديل</span>
+              <span className="truncate">الصوتيات</span>
             </div>
+
             <div 
               onClick={(e) => {
                 e.stopPropagation();
-                onOpenAudioModal();
+                onSelectItem?.({ type: 'audio', id: 'main_audio' });
               }}
-              className="flex-1 h-10 bg-[#1A1C1E] rounded-lg border border-[#2B2C30] relative overflow-hidden flex items-center px-2 hover:border-[#006C4C] transition-colors"
+              className={`flex-1 h-11 rounded-xl relative overflow-hidden flex items-center px-2 transition-all cursor-pointer ${
+                isAudioSelected
+                  ? 'border-2 border-[#F5B800] bg-[#1d352b] shadow-md'
+                  : 'border border-[#383838] bg-[#222825] hover:border-[#484848]'
+              }`}
             >
+              {isAudioSelected && (
+                <>
+                  <div className="absolute left-0 inset-y-0 w-2.5 bg-[#F5B800] rounded-l cursor-ew-resize z-10" />
+                  <div className="absolute right-0 inset-y-0 w-2.5 bg-[#F5B800] rounded-r cursor-ew-resize z-10" />
+                </>
+              )}
+
               {draft.replacedAudio ? (
-                <div className="w-full flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-[#89F8C7] truncate">
+                <div className="w-full flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 font-bold text-[#89F8C7] truncate">
                     <span>🎵 {draft.replacedAudio.title}</span>
                     {draft.replacedAudio.trimStart !== undefined && draft.replacedAudio.trimEnd !== undefined && (
-                      <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-600/50 px-1.5 py-0.2 rounded font-mono">
-                        قص: {draft.replacedAudio.trimStart.toFixed(1)}s - {draft.replacedAudio.trimEnd.toFixed(1)}s
+                      <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-mono">
+                        {draft.replacedAudio.trimStart.toFixed(1)}s - {draft.replacedAudio.trimEnd.toFixed(1)}s
                       </span>
                     )}
-                    <span className="text-[10px] text-[#8E9192]">({Math.round(draft.replacedAudioVolume * 100)}%)</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {onOpenAudioTrimModal && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenAudioTrimModal();
-                        }}
-                        className="px-2 py-0.5 rounded-md bg-emerald-900/60 hover:bg-emerald-800 text-[#89F8C7] border border-emerald-500/40 text-[10px] font-semibold flex items-center gap-1 transition shadow-sm"
-                        title="فتح مقص الصوت السهل"
-                      >
-                        <Scissors className="w-2.5 h-2.5" />
-                        <span>قص الصوت</span>
-                      </button>
-                    )}
-
-                    {onSyncDurationToAudio && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSyncDurationToAudio();
-                        }}
-                        className="px-2 py-0.5 rounded-md bg-[#006C4C]/40 hover:bg-[#006C4C]/70 text-white border border-[#89F8C7]/30 text-[10px] font-semibold flex items-center gap-1 transition shadow-sm hidden sm:flex"
-                        title="جعل مدة الفيديو مطابقة لوقت هذا الصوت تماماً"
-                      >
-                        <Clock className="w-2.5 h-2.5 text-[#89F8C7]" />
-                        <span>الفيديو حسب وقت الصوت</span>
-                      </button>
-                    )}
-
-                    <div className="hidden md:flex items-center gap-0.5 w-20 h-4">
-                      {Array.from({ length: 16 }).map((_, i) => (
+                    {/* Simulated Waveform peaks */}
+                    <div className="flex items-center gap-0.5 h-5 opacity-80">
+                      {Array.from({ length: 24 }).map((_, i) => (
                         <div
                           key={i}
-                          className="flex-1 bg-[#00875F] rounded-full"
-                          style={{ height: `${(i % 5 + 2) * 2.5}px` }}
+                          className="w-1 bg-[#89F8C7] rounded-full"
+                          style={{ height: `${Math.sin(i * 0.45) * 8 + 10}px` }}
                         />
                       ))}
                     </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenAudioTrimModal?.();
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-emerald-900/60 hover:bg-emerald-800 text-[#89F8C7] border border-emerald-500/40 text-[10px] font-bold"
+                    >
+                      قص الصوت
+                    </button>
                   </div>
                 </div>
               ) : (
-                <div className="text-xs text-[#8E9192] italic flex items-center justify-between w-full">
-                  <span>انقر لإدراج صوت الشيخ أو تلاوة قرآنية أو موعظة</span>
-                  <span className="text-[10px] text-[#006C4C] font-semibold bg-[#006C4C]/10 px-2 py-0.5 rounded">
-                    + إدراج صوت
-                  </span>
-                </div>
-              )}
-
-              {/* Extra uploaded audio clips */}
-              {audioClips.map((clip) => {
-                const startPct = Math.max(0, (clip.startTime / duration) * 100);
-                const widthPct = Math.min(100 - startPct, Math.max(6, ((clip.endTime - clip.startTime) / duration) * 100));
-
-                return (
-                  <div
-                    key={clip.id}
+                <div className="text-xs text-[#777777] italic flex items-center justify-between w-full">
+                  <span>+ إدراج صوت الشيخ أو تسجيل صوتي</span>
+                  <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onOpenMediaModal?.();
+                      onOpenAudioModal();
                     }}
-                    className="absolute inset-y-1 bg-emerald-900/70 border border-emerald-400 rounded-md flex items-center justify-between px-2 text-[10px] text-emerald-200 truncate shadow"
-                    style={{ left: `${startPct}%`, width: `${widthPct}%` }}
-                    title={`صوت: ${clip.name}`}
+                    className="text-[10px] text-[#89F8C7] font-bold bg-[#89F8C7]/10 px-2 py-0.5 rounded"
                   >
-                    <span className="truncate">🎵 {clip.name}</span>
-                    {onDeleteClip && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteClip(clip.id);
-                        }}
-                        className="w-4 h-4 rounded hover:bg-black/40 flex items-center justify-center shrink-0"
-                      >
-                        <Trash2 className="w-2.5 h-2.5 text-red-300" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* TRACK 4: Text Overlays (Quranic Verses) */}
-          <div className="flex items-center gap-2 group">
-            <div 
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenTextModal();
-              }}
-              className="w-24 shrink-0 flex items-center gap-1.5 text-[11px] font-medium text-[#C4C7C8] cursor-pointer hover:text-[#89F8C7]"
-            >
-              <Type className="w-3.5 h-3.5 text-[#FFDF9E]" />
-              <span>نصوص وآيات</span>
-            </div>
-            <div 
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenTextModal();
-              }}
-              className="flex-1 h-9 bg-[#1A1C1E] rounded-lg border border-[#2B2C30] relative overflow-hidden flex items-center px-2 hover:border-[#785900] transition-colors"
-            >
-              {draft.textOverlays.map((txt) => {
-                const startPct = (txt.startTime / duration) * 100;
-                const widthPct = Math.min(100 - startPct, ((txt.endTime - txt.startTime) / duration) * 100);
-                return (
-                  <div
-                    key={txt.id}
-                    className="absolute h-6 rounded bg-[#785900]/40 border border-[#FFDF9E]/60 flex items-center px-2 text-[11px] text-[#FFDF9E] font-amiri font-bold truncate"
-                    style={{ left: `${startPct}%`, width: `${widthPct}%` }}
-                  >
-                    <span className="truncate">
-                      {txt.hasAyahBrackets ? `﴿ ${txt.text} ﴾` : txt.text}
-                    </span>
-                  </div>
-                );
-              })}
-              {draft.textOverlays.length === 0 && (
-                <span className="text-xs text-[#8E9192] italic">لا توجد نصوص بعد (+ أضف نص)</span>
+                    + إضافة صوت
+                  </button>
+                </div>
               )}
-            </div>
-          </div>
-
-          {/* TRACK 5: Spiritual Effects Track */}
-          <div className="flex items-center gap-2 group">
-            <div 
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenEffectsModal();
-              }}
-              className="w-24 shrink-0 flex items-center gap-1.5 text-[11px] font-medium text-[#C4C7C8] cursor-pointer hover:text-[#89F8C7]"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-[#89F8C7]" />
-              <span>المؤثرات</span>
-            </div>
-            <div 
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenEffectsModal();
-              }}
-              className="flex-1 h-8 bg-[#1A1C1E] rounded-lg border border-[#2B2C30] relative overflow-hidden flex items-center px-2 hover:border-[#006C4C] transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                {draft.effects.filter((e) => e.enabled).map((eff) => (
-                  <span
-                    key={eff.id}
-                    className="text-[10px] bg-[#006C4C]/30 text-[#89F8C7] border border-[#006C4C]/60 px-2 py-0.5 rounded-md font-medium"
-                  >
-                    ✨ {eff.name}
-                  </span>
-                ))}
-              </div>
             </div>
           </div>
 
         </div>
 
-        {/* Dynamic Vertical Playhead with Interactive Scissor Badge Pin */}
-        <div
-          className="absolute top-0 bottom-0 w-[2px] bg-red-500 shadow-lg z-30 pointer-events-none transition-none"
+        {/* KINEMASTER SIGNATURE PLAYHEAD NEEDLE (Vertical Line with Top Pointer Head) */}
+        <div 
+          className="absolute top-0 bottom-0 pointer-events-none z-30 transition-none"
           style={{ left: `${playheadPercent}%` }}
         >
-          {/* Interactive Scissor Badge Pin on top of playhead cursor */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 -mt-4 pointer-events-auto group">
-            <button
-              onClick={handleSplit}
-              title={`قص الفيديو عند موقع المؤشر الحالي (${currentTime.toFixed(1)} ثانية)`}
-              className="w-7 h-6 rounded-md bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg border border-red-300 transition-all active:scale-90 hover:scale-110 cursor-pointer"
-            >
-              <Scissors className="w-3.5 h-3.5 text-white stroke-[2.5]" />
-            </button>
-            {/* Quick Hover Tooltip */}
-            <div className="hidden group-hover:flex items-center gap-1 absolute top-7 left-1/2 -translate-x-1/2 whitespace-nowrap bg-black/95 text-[#89F8C7] text-[10px] font-mono px-2 py-0.5 rounded-md border border-[#2B2C30] shadow-xl z-40 pointer-events-none">
-              <span>قص هنا</span>
-              <span className="text-white font-bold">{currentTime.toFixed(1)}s</span>
-            </div>
+          {/* Top Playhead Needle Head */}
+          <div className="absolute top-0 -translate-x-1/2 flex flex-col items-center">
+            <div className="w-3.5 h-3.5 bg-red-600 rotate-45 transform origin-center shadow-lg -translate-y-1" />
           </div>
-
-          {/* Pointer needle tip */}
-          <div className="w-2.5 h-2.5 bg-red-500 -ml-[4px] mt-2 rotate-45 rounded-xs shadow pointer-events-none" />
+          {/* Vertical Needle Line */}
+          <div className="w-[2px] h-full bg-red-600 shadow-[0_0_8px_rgba(239,68,68,0.8)] -translate-x-1/2" />
         </div>
 
       </div>

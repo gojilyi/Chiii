@@ -36,8 +36,6 @@ export const EasyAudioTrimModal: React.FC<EasyAudioTrimModalProps> = ({
   currentTime,
   onSaveAudioTrim,
 }) => {
-  if (!isOpen) return null;
-
   const audioTrack: AudioTrackConfig | null = draft.replacedAudio || null;
   const totalDuration = Math.max(1, audioTrack?.duration || draft.duration || 15);
 
@@ -148,6 +146,8 @@ export const EasyAudioTrimModal: React.FC<EasyAudioTrimModalProps> = ({
     onSaveAudioTrim(trimStart, trimEnd, syncVideoDuration);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">

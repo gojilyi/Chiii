@@ -24,7 +24,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { AudioTrackConfig } from '../../../types';
-import { audioEngine } from '../../../services/audioEngine';
+import { audioEngine, extractMediaDuration } from '../../../services/audioEngine';
 
 interface AudioInsertModalProps {
   isOpen: boolean;
@@ -55,8 +55,6 @@ export const AudioInsertModal: React.FC<AudioInsertModalProps> = ({
   onOpenAudioTrim,
   onSyncDurationToAudio,
 }) => {
-  if (!isOpen) return null;
-
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
@@ -90,44 +88,11 @@ export const AudioInsertModal: React.FC<AudioInsertModalProps> = ({
     }
   };
 
-  /**
-   * Robust duration extractor using Web Audio API decodeAudioData
-   * Works on all mobile browsers, m4a, wav, mp3, ogg, WhatsApp audios
-   */
-  const extractAudioDuration = async (fileOrBlob: Blob): Promise<number> => {
-    try {
-      const arrayBuffer = await fileOrBlob.arrayBuffer();
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const audioCtx = new AudioCtx();
-      const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      const dur = Math.round(decodedBuffer.duration);
-      audioCtx.close().catch(() => {});
-      if (dur > 0) return dur;
-    } catch (e) {
-      console.warn('AudioContext decode failed, falling back to Audio element:', e);
-    }
-
-    return new Promise<number>((resolve) => {
-      const audio = new Audio();
-      const blobUrl = URL.createObjectURL(fileOrBlob);
-      audio.src = blobUrl;
-      audio.onloadedmetadata = () => {
-        const dur = Math.round(audio.duration) || 30;
-        URL.revokeObjectURL(blobUrl);
-        resolve(dur);
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(blobUrl);
-        resolve(30);
-      };
-      setTimeout(() => resolve(30), 4000);
-    });
-  };
-
   const processAudioFile = async (file: File | Blob, customTitle?: string) => {
     setIsProcessing(true);
     try {
-      const duration = await extractAudioDuration(file);
+      const realDur = await extractMediaDuration(file);
+      const duration = realDur > 0 ? realDur : 30;
       const blobUrl = URL.createObjectURL(file);
       const title = customTitle || (file instanceof File ? file.name.replace(/\.[^/.]+$/, '') : `تسجيل الشيخ ${new Date().toLocaleTimeString('ar-SA')}`);
 
@@ -248,6 +213,8 @@ export const AudioInsertModal: React.FC<AudioInsertModalProps> = ({
     }
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">

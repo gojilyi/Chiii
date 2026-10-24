@@ -37,8 +37,6 @@ export const ParticleOverlaysModal: React.FC<ParticleOverlaysModalProps> = ({
   const [copiedCmd, setCopiedCmd] = useState<boolean>(false);
   const [selectedFilterId, setSelectedFilterId] = useState<string>('golden_dust');
 
-  if (!isOpen) return null;
-
   const handleToggle = (id: string) => {
     const updated = particleOverlays.map((p) =>
       p.id === id ? { ...p, enabled: !p.enabled } : p
@@ -124,6 +122,8 @@ export const ParticleOverlaysModal: React.FC<ParticleOverlaysModalProps> = ({
         return <Layers className="w-5 h-5 text-[#89F8C7]" />;
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">

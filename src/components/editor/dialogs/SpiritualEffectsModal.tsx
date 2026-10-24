@@ -34,8 +34,6 @@ export const SpiritualEffectsModal: React.FC<SpiritualEffectsModalProps> = ({
   effects,
   onUpdateEffects,
 }) => {
-  if (!isOpen) return null;
-
   const [activeCategory, setActiveCategory] = useState<'all' | 'lighting' | 'particles' | 'visualizer' | 'vintage'>('all');
   const [youtubeUrl, setYoutubeUrl] = useState<string>(USER_REQUESTED_YOUTUBE_PLAYLIST);
   const [importedMessage, setImportedMessage] = useState<string | null>(null);
@@ -71,6 +69,8 @@ export const SpiritualEffectsModal: React.FC<SpiritualEffectsModalProps> = ({
   const filteredEffects = activeCategory === 'all'
     ? effects
     : effects.filter((e) => e.category === activeCategory);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">

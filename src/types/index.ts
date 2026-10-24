@@ -160,6 +160,37 @@ export interface AudioTrackConfig {
   trimEnd?: number;   // seconds
 }
 
+export interface BackgroundAdjustments {
+  brightness: number;        // 50 to 150 (default: 100)
+  contrast: number;          // 50 to 150 (default: 100)
+  blur: number;              // 0 to 20 px (default: 0)
+  vignette: number;          // 0 to 100% (default: 25)
+  overlayDarkness: number;   // 0 to 90% (default: 0)
+  scale: number;             // 1.0 to 2.5 (default: 1.0)
+  panX: number;              // -50 to +50% (default: 0)
+  panY: number;              // -50 to +50% (default: 0)
+  flipHorizontal: boolean;   // default: false
+  colorGrade: 'none' | 'warm_gold' | 'emerald_islamic' | 'vintage_amber' | 'serene_blue' | 'monochrome';
+  showGoldArchFrame: boolean;
+  bannerOverlay?: {
+    enabled: boolean;
+    headerText: string;     // e.g. "شرح كتاب"
+    mainTitle: string;      // e.g. "إيصال السالك"
+    subtitle: string;       // e.g. "إلى أصول مذهب الإمام مالك"
+    positionY: number;      // 0 - 100 (default: 25)
+    positionX: number;      // 0 - 100 (default: 50)
+    scale: number;          // 0.6 - 1.5 (default: 1.0)
+  };
+  bookGraphicOverlay?: {
+    enabled: boolean;
+    title: string;          // e.g. "إيصال السالك"
+    author: string;         // e.g. "أصول مذهب مالك"
+    positionX: number;      // 0 - 100 (default: 14)
+    positionY: number;      // 0 - 100 (default: 72)
+    scale: number;          // 0.5 - 1.5 (default: 1.0)
+  };
+}
+
 export interface ProjectDraft {
   id: string;
   title: string;
@@ -174,6 +205,9 @@ export interface ProjectDraft {
   trimStart?: number; // Video trim start in seconds
   trimEnd?: number; // Video trim end in seconds
   mediaClips?: MediaClip[]; // Multiple images, videos, audio clips on the timeline
+  
+  // Background Adjustments & Customization (التعديل على الخلفية)
+  backgroundAdjustments?: BackgroundAdjustments;
   
   // Audio configuration (Mute & Replace feature)
   muteOriginalAudio: boolean;
@@ -192,3 +226,4 @@ export interface ProjectDraft {
   
   thumbnailUrl: string;
 }
+
