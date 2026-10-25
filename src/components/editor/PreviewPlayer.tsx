@@ -19,6 +19,7 @@ interface PreviewPlayerProps {
   onSplitAtPlayhead?: () => void;
   onTrimBeforePlayhead?: () => void;
   onTrimAfterPlayhead?: () => void;
+  onCanvasReady?: (canvas: HTMLCanvasElement) => void;
 }
 
 export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
@@ -32,12 +33,19 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
   onSplitAtPlayhead,
   onTrimBeforePlayhead,
   onTrimAfterPlayhead,
+  onCanvasReady,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageElementRef = useRef<HTMLImageElement>(null);
   const videoElementRef = useRef<HTMLVideoElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const clipImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
+
+  useEffect(() => {
+    if (canvasRef.current && onCanvasReady) {
+      onCanvasReady(canvasRef.current);
+    }
+  }, [onCanvasReady]);
 
   // Dynamic project duration: matches the longest audio or video track, never limited to 16s
   const audioDuration = draft.replacedAudio

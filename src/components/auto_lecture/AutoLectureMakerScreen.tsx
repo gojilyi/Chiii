@@ -616,7 +616,7 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
   -c:a aac -b:a 192k -shortest -pix_fmt yuv420p output_auto_lesson.mp4`;
 
   // Real in-browser video generator (MediaRecorder stream to video)
-  const handleStartExport = async () => {
+  const exportVideo = async () => {
     setIsExporting(true);
     setExportProgress(10);
     setIsExportDone(false);
@@ -916,7 +916,7 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
           <div className="w-full pt-2">
             {!isExporting && !isExportDone && (
               <button
-                onClick={handleStartExport}
+                onClick={exportVideo}
                 className="w-full h-11 rounded-xl bg-[#89F8C7] hover:bg-[#72dbb0] text-[#002114] text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 active:scale-[0.98]"
               >
                 <Video className="w-4 h-4" />

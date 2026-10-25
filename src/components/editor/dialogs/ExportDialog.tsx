@@ -113,7 +113,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
    * Composites the background image/video + Sheikh voice + all spiritual effects + text overlays + calligraphy
    * into a genuine playable video file with audio!
    */
-  const handleStartRealExport = async () => {
+  const exportVideo = async () => {
     setIsExporting(true);
     setExportProgress(0);
     setIsDone(false);
@@ -366,7 +366,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
                   {!isExporting && !isDone && (
                     <button
-                      onClick={handleStartRealExport}
+                      onClick={exportVideo}
                       className="px-6 py-3 rounded-xl bg-gradient-to-r from-[#006C4C] via-[#00875F] to-[#00A870] hover:from-[#00573c] hover:to-[#006C4C] text-white text-xs sm:text-sm font-bold transition-all shadow-lg active:scale-[0.98] flex items-center gap-2.5 shrink-0 border border-[#89F8C7]/60"
                     >
                       <Download className="w-4 h-4 text-[#89F8C7]" />
@@ -383,7 +383,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                       <div className="font-bold text-red-300">حدث خطأ أثناء تصدير الفيديو:</div>
                       <div className="text-red-200/90 leading-relaxed">{exportError}</div>
                       <button
-                        onClick={handleStartRealExport}
+                        onClick={exportVideo}
                         className="mt-2 px-3 py-1.5 rounded-lg bg-red-800/60 hover:bg-red-800 text-white text-xs font-semibold flex items-center gap-1.5 transition"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
@@ -437,7 +437,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={handleStartRealExport}
+                            onClick={exportVideo}
                             className="px-3 py-1.5 rounded-lg bg-[#292A2E] hover:bg-[#333539] text-xs text-[#C4C7C8] border border-[#36373B] flex items-center gap-1 transition"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
