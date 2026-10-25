@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { ProjectDraft, ExportFormatType, ExportResolutionType } from '../../../types';
 import { FFmpegGenerator } from '../../../services/ffmpegGenerator';
-import { VideoRenderingEngine } from '../../../services/videoRenderingEngine';
+import { VideoExporter } from '../../../services/videoExporter';
 
 interface ExportDialogProps {
   isOpen: boolean;
@@ -130,33 +130,42 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     setFfmpegLogs(initialLogs);
 
     try {
-      const result = await VideoRenderingEngine.renderStudioVideo(
-        draft,
-        selectedResolution,
-        selectedFps,
-        (progress, stageDesc, logLine) => {
+      await VideoExporter.exportVideo(draft, {
+        onProgress: (progress, stageDesc) => {
           setExportProgress(progress);
           setCurrentStageText(stageDesc);
-          if (logLine) {
-            setFfmpegLogs((prev) => [...prev, logLine]);
-          }
+          setFfmpegLogs((prev) => [...prev, `[progress ${progress}%] ${stageDesc}`]);
+        },
+        onSuccess: (filename, sizeBytes, format) => {
+          setGeneratedFilename(filename);
+          setGeneratedSizeMb((sizeBytes / (1024 * 1024)).toFixed(2));
+          setIsDone(true);
+          setIsExporting(false);
+          setExportError(null);
+          setCurrentStageText(`اكتمل إنتاج الفيديو بنجاح بصيغة ${format}!`);
+          setFfmpegLogs((prev) => [
+            ...prev,
+            `[success] تم حفظ وتنزيل الفيديو: ${filename} (${(sizeBytes / (1024 * 1024)).toFixed(2)} MB)`
+          ]);
+        },
+        onError: (errTitle, errDetails) => {
+          setIsDone(false);
+          setIsExporting(false);
+          setExportError(`${errTitle}: ${errDetails}`);
+          setCurrentStageText(`فشلت المعالجة: ${errDetails}`);
+          setFfmpegLogs((prev) => [
+            ...prev,
+            `[error] ${errTitle}: ${errDetails}`
+          ]);
         }
-      );
-
-      setGeneratedBlobUrl(result.blobUrl);
-      setGeneratedFilename(result.filename);
-      setGeneratedSizeMb((result.sizeBytes / (1024 * 1024)).toFixed(2));
-      setIsDone(true);
-      setIsExporting(false);
-      setExportError(null);
-      setCurrentStageText('اكتمل إنتاج الفيديو بنجاح!');
+      });
     } catch (err: any) {
       console.error('Video export error:', err);
       const errMsg = err?.message || 'تعذر استخراج الفيديو';
       setFfmpegLogs((prev) => [
         ...prev,
         `[error] فشل التصدير: ${errMsg}`,
-        `[hint] يرجى التأكد من اختيار ملف صوتي صالح والضغط على إعادة المحاولة`
+        `[hint] يرجى التأكد من تشغيل المتصفح والضغط على إعادة المحاولة`
       ]);
 
       setGeneratedBlobUrl(null);

@@ -22,6 +22,9 @@ async function startServer() {
   app.use(express.json({ limit: '150mb' }));
   app.use(express.urlencoded({ extended: true, limit: '150mb' }));
 
+  // Serve @ffmpeg/core dist files locally for fast and reliable browser loading
+  app.use('/ffmpeg', express.static(path.resolve(__dirname, 'node_modules/@ffmpeg/core/dist/esm')));
+
   /**
    * Health Check
    */
@@ -197,12 +200,15 @@ async function startServer() {
       res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     });
   } else {
+    // HMR is disabled in AI Studio iframe environment to prevent WebSocket disconnection errors
+    process.env.DISABLE_HMR = 'true';
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: process.env.DISABLE_HMR !== 'true' },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   }
+
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Sheikh Eid Studio server running on port ${PORT}`);

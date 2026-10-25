@@ -5,7 +5,7 @@
 
 import { ProjectDraft, BackgroundAdjustments } from '../types';
 import { DEFAULT_BACKGROUND_ADJUSTMENTS } from '../constants/defaults';
-import { FFmpegWasmService } from './ffmpegWasmService';
+import { FFmpegWasmService, AudioTrackItem } from './ffmpegWasmService';
 
 export interface VideoExportCallbacks {
   onProgress: (percent: number, stageText: string) => void;
@@ -15,53 +15,102 @@ export interface VideoExportCallbacks {
 
 export class VideoExporter {
   /**
-   * Selects the preferred video MIME type strictly following the prioritized list:
-   * ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
-   */
-  static getPreferredMimeType(): string {
-    if (typeof MediaRecorder === 'undefined') {
-      throw new Error('متصفحك لا يدعم واجهة MediaRecorder لتسجيل الفيديو');
-    }
-
-    const candidateTypes = [
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=vp8,opus',
-      'video/webm',
-      'video/mp4'
-    ];
-
-    const supported = candidateTypes.find((type) => MediaRecorder.isTypeSupported(type));
-    if (!supported) {
-      throw new Error('لم يتم العثور على صيغة فيديو مدعومة في المتصفح لتسجيل MediaRecorder');
-    }
-
-    return supported;
-  }
-
-  /**
-   * Preloads an image asynchronously
+   * Helper to preload an image asynchronously with crossOrigin="anonymous"
    */
   private static loadImage(url: string): Promise<HTMLImageElement> {
     return new Promise((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => resolve(img);
-      img.onerror = () => resolve(img);
+      img.onerror = () => {
+        console.warn('Failed to load image asset:', url);
+        resolve(img);
+      };
       img.src = url;
     });
   }
 
   /**
-   * Draws a complete composite frame onto the rendering context
+   * Helper to preload a video element asynchronously with crossOrigin="anonymous"
+   */
+  private static loadVideo(url: string): Promise<HTMLVideoElement> {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+
+      let resolved = false;
+      const onReady = () => {
+        if (!resolved) {
+          resolved = true;
+          resolve(video);
+        }
+      };
+
+      video.addEventListener('loadedmetadata', onReady);
+      video.addEventListener('canplay', onReady);
+      video.addEventListener('error', () => {
+        console.warn('Failed to load video asset:', url);
+        onReady();
+      });
+
+      // Safety timeout after 5s
+      setTimeout(onReady, 5000);
+      video.src = url;
+    });
+  }
+
+  /**
+   * Seeks a video element to a target time and awaits the seeked event
+   */
+  private static seekVideo(video: HTMLVideoElement, targetTime: number): Promise<void> {
+    return new Promise((resolve) => {
+      if (!video || !Number.isFinite(targetTime)) {
+        resolve();
+        return;
+      }
+
+      const clampedTime = Math.max(0, Math.min(targetTime, video.duration || targetTime));
+      if (Math.abs(video.currentTime - clampedTime) < 0.02) {
+        resolve();
+        return;
+      }
+
+      let resolved = false;
+      const onSeeked = () => {
+        if (!resolved) {
+          resolved = true;
+          video.removeEventListener('seeked', onSeeked);
+          resolve();
+        }
+      };
+
+      video.addEventListener('seeked', onSeeked);
+      try {
+        video.currentTime = clampedTime;
+      } catch {
+        onSeeked();
+      }
+
+      // Safeguard timeout so rendering never hangs on dropped seek events
+      setTimeout(onSeeked, 120);
+    });
+  }
+
+  /**
+   * Draws a composite video frame onto the canvas context with all layers
    */
   private static drawFrame(
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
     currentTime: number,
+    totalDuration: number,
     draft: ProjectDraft,
-    baseImage: HTMLImageElement,
-    clipImagesMap: Map<string, HTMLImageElement>
+    baseMedia: HTMLImageElement | HTMLVideoElement | null,
+    clipElementsMap: Map<string, HTMLImageElement | HTMLVideoElement>
   ) {
     // 1. Clear background
     ctx.fillStyle = '#0a1411';
@@ -81,7 +130,7 @@ export class VideoExporter {
     // Subtle zoom (Ken Burns) if enabled
     const zoomEffect = draft.effects.find((e) => e.id === 'subtle_zoom' && e.enabled);
     if (zoomEffect) {
-      const durationVal = Math.max(draft.duration || 1, 1);
+      const durationVal = Math.max(totalDuration || 1, 1);
       const zoomScale = 1 + ((currentTime / durationVal) * (zoomEffect.intensity / 100) * 0.08);
       ctx.translate(width / 2, height / 2);
       ctx.scale(zoomScale, zoomScale);
@@ -110,10 +159,24 @@ export class VideoExporter {
     ctx.scale(bgAdj.scale * (bgAdj.flipHorizontal ? -1 : 1), bgAdj.scale);
     ctx.translate(-centerX, -centerY);
 
-    // Draw Base Image/Video
-    if (baseImage && baseImage.complete && baseImage.naturalWidth > 0) {
-      ctx.drawImage(baseImage, 0, 0, width, height);
-    } else {
+    // Draw Base Image or Video
+    let drawn = false;
+    if (baseMedia instanceof HTMLVideoElement && baseMedia.readyState >= 2 && baseMedia.videoWidth > 0) {
+      try {
+        ctx.drawImage(baseMedia, 0, 0, width, height);
+        drawn = true;
+      } catch {}
+    } else if (baseMedia instanceof HTMLImageElement && baseMedia.complete && baseMedia.naturalWidth > 0) {
+      try {
+        ctx.drawImage(baseMedia, 0, 0, width, height);
+        drawn = true;
+      } catch {}
+    }
+
+    ctx.restore();
+    ctx.filter = 'none';
+
+    if (!drawn) {
       const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
       bgGrad.addColorStop(0, '#0c1a16');
       bgGrad.addColorStop(0.5, '#122b22');
@@ -122,14 +185,119 @@ export class VideoExporter {
       ctx.fillRect(0, 0, width, height);
     }
 
-    ctx.restore();
-    ctx.filter = 'none';
+    // 1.2 Color Grading Filter
+    if (bgAdj.colorGrade && bgAdj.colorGrade !== 'none') {
+      ctx.save();
+      if (bgAdj.colorGrade === 'warm_gold') {
+        ctx.fillStyle = 'rgba(255, 190, 70, 0.18)';
+        ctx.fillRect(0, 0, width, height);
+      } else if (bgAdj.colorGrade === 'emerald_islamic') {
+        ctx.fillStyle = 'rgba(0, 108, 76, 0.22)';
+        ctx.fillRect(0, 0, width, height);
+      } else if (bgAdj.colorGrade === 'vintage_amber') {
+        ctx.fillStyle = 'rgba(200, 130, 40, 0.22)';
+        ctx.fillRect(0, 0, width, height);
+      } else if (bgAdj.colorGrade === 'serene_blue') {
+        ctx.fillStyle = 'rgba(30, 90, 150, 0.18)';
+        ctx.fillRect(0, 0, width, height);
+      } else if (bgAdj.colorGrade === 'monochrome') {
+        ctx.fillStyle = 'rgba(120, 120, 120, 0.25)';
+        ctx.fillRect(0, 0, width, height);
+      }
+      ctx.restore();
+    }
+
+    // 1.3 Overlay Darkness
+    if (bgAdj.overlayDarkness > 0) {
+      ctx.save();
+      ctx.fillStyle = `rgba(0, 0, 0, ${bgAdj.overlayDarkness / 100})`;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    // 1.4 Vignette Shadow
+    if (bgAdj.vignette > 0) {
+      ctx.save();
+      const vigGrad = ctx.createRadialGradient(
+        width / 2,
+        height / 2,
+        width * 0.32,
+        width / 2,
+        height / 2,
+        width * 0.72
+      );
+      vigGrad.addColorStop(0, 'transparent');
+      vigGrad.addColorStop(1, `rgba(0, 0, 0, ${(bgAdj.vignette / 100) * 0.85})`);
+      ctx.fillStyle = vigGrad;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    // 1.5 Golden Arch Frame
+    if (bgAdj.showGoldArchFrame) {
+      ctx.save();
+      const pad = 24 * (width / 720);
+      ctx.strokeStyle = 'rgba(235, 195, 75, 0.85)';
+      ctx.lineWidth = 3.5 * (width / 720);
+      ctx.shadowColor = 'rgba(255, 215, 0, 0.6)';
+      ctx.shadowBlur = 10;
+      
+      ctx.beginPath();
+      ctx.moveTo(pad, height - pad);
+      ctx.lineTo(pad, pad + 70);
+      ctx.quadraticCurveTo(width / 2, pad - 20, width - pad, pad + 70);
+      ctx.lineTo(width - pad, height - pad);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 1.6 Lesson Banner Overlay
+    if (bgAdj.bannerOverlay?.enabled) {
+      const b = bgAdj.bannerOverlay;
+      const bScale = (b.scale || 1.0) * (width / 720);
+      const bx = (b.positionX / 100) * width;
+      const by = (b.positionY / 100) * height;
+
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.scale(bScale, bScale);
+
+      const bannerW = 320;
+      const bannerH = 110;
+      const wHalf = bannerW / 2;
+      const hHalf = bannerH / 2;
+
+      ctx.fillStyle = 'rgba(15, 30, 24, 0.92)';
+      ctx.strokeStyle = '#D4AF37';
+      ctx.lineWidth = 2.5;
+
+      ctx.beginPath();
+      ctx.roundRect(-wHalf, -hHalf, bannerW, bannerH, 14);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#A3E635';
+      ctx.font = 'bold 18px "Cairo", sans-serif';
+      ctx.fillText(b.headerText || 'شرح كتاب', 0, -hHalf + 28);
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 24px "Amiri", serif';
+      ctx.fillText(b.mainTitle || 'إيصال السالك', 0, -hHalf + 60);
+
+      ctx.fillStyle = '#CBD5E1';
+      ctx.font = '14px "Cairo", sans-serif';
+      ctx.fillText(b.subtitle || 'إلى أصول مذهب الإمام مالك', 0, -hHalf + 88);
+
+      ctx.restore();
+    }
 
     // 2. Render Media Clips
     (draft.mediaClips || []).forEach((clip) => {
       if (currentTime >= clip.startTime && currentTime <= clip.endTime) {
-        const clipImg = clipImagesMap.get(clip.url);
-        if (clipImg && clipImg.complete && clipImg.naturalWidth > 0) {
+        const el = clipElementsMap.get(clip.url);
+        if (el) {
           ctx.save();
           ctx.globalAlpha = Math.max(0, Math.min(1, clip.opacity ?? 1));
 
@@ -141,10 +309,21 @@ export class VideoExporter {
           ctx.scale(scale, scale);
 
           const targetW = width * 0.55;
-          const aspect = clipImg.naturalHeight / clipImg.naturalWidth;
-          const targetH = targetW * aspect;
+          let elW = 1;
+          let elH = 1;
 
-          ctx.drawImage(clipImg, -targetW / 2, -targetH / 2, targetW, targetH);
+          if (el instanceof HTMLImageElement && el.complete && el.naturalWidth > 0) {
+            elW = el.naturalWidth;
+            elH = el.naturalHeight;
+            const targetH = targetW * (elH / elW);
+            ctx.drawImage(el, -targetW / 2, -targetH / 2, targetW, targetH);
+          } else if (el instanceof HTMLVideoElement && el.readyState >= 2 && el.videoWidth > 0) {
+            elW = el.videoWidth;
+            elH = el.videoHeight;
+            const targetH = targetW * (elH / elW);
+            ctx.drawImage(el, -targetW / 2, -targetH / 2, targetW, targetH);
+          }
+
           ctx.restore();
         }
       }
@@ -158,7 +337,7 @@ export class VideoExporter {
 
         ctx.save();
         const font = overlay.fontFamily === 'Aref Ruqaa' ? `'Aref Ruqaa', cursive` : `'${overlay.fontFamily}', 'Amiri', serif`;
-        ctx.font = `600 ${overlay.fontSize * (width / 400)}px ${font}`;
+        ctx.font = `600 ${overlay.fontSize * (width / 420)}px ${font}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
@@ -173,7 +352,7 @@ export class VideoExporter {
 
         if (overlay.backgroundColor) {
           const metrics = ctx.measureText(displayText);
-          const boxPadding = 16;
+          const boxPadding = 16 * (width / 420);
           ctx.fillStyle = overlay.backgroundColor;
           ctx.fillRect(
             posX - metrics.width / 2 - boxPadding,
@@ -221,15 +400,11 @@ export class VideoExporter {
   }
 
   /**
-   * Main exportVideo execution:
-   * 1. Sets up Canvas with strict even dimensions.
-   * 2. Captures canvas.captureStream(30).
-   * 3. Sets up AudioContext, resumes it, creates MediaStreamDestination, connects audio, and merges tracks.
-   * 4. Selects prioritized codec.
-   * 5. Runs MediaRecorder.start(1000).
-   * 6. Plays from second 0 to project end with requestAnimationFrame rendering.
-   * 7. Validates chunks (> 1KB), runs ffmpeg.wasm to convert to MP4 (with fallback to original WebM).
-   * 8. Triggers automatic download.
+   * Main Kinemaster-style Export Pipeline:
+   * 1. Render all frames strictly onto canvas without live playback -> saved to ffmpeg virtual FS as frame_%05d.jpg
+   * 2. Prepare audio with ffmpeg atrim, adelay, volume, amix -> mixed_audio.aac
+   * 3. Encode final MP4 with ffmpeg libx264 ultrafast + aac -> output.mp4
+   * 4. Trigger automatic download of output.mp4 and clean up virtual FS
    */
   static async exportVideo(
     draft: ProjectDraft,
@@ -237,10 +412,17 @@ export class VideoExporter {
   ): Promise<void> {
     const { onProgress, onSuccess, onError } = callbacks;
 
-    try {
-      onProgress(2, 'جاري فحص دفق الفيديو وضبط الأبعاد الزوجية...');
+    const temporaryVirtualFiles: string[] = [];
 
-      // 1. Calculate strictly even canvas dimensions
+    try {
+      onProgress(1, 'جاري تهيئة محرك الرندرة والتشفير (Kinemaster Render & Encode)...');
+
+      // Initialize ffmpeg.wasm
+      await FFmpegWasmService.load((pct) => {
+        onProgress(Math.min(5, Math.round(pct * 0.05)), 'جاري تحميل محرك ffmpeg.wasm...');
+      });
+
+      // 1. Calculate dimensions (Strictly even numbers)
       let width = 720;
       let height = 1280;
       if (draft.aspectRatio === '16:9') {
@@ -250,12 +432,48 @@ export class VideoExporter {
         width = 720;
         height = 720;
       }
-
-      // Guarantee dimensions are strictly even numbers
       if (width % 2 !== 0) width += 1;
       if (height % 2 !== 0) height += 1;
 
-      // Create dedicated offscreen rendering canvas
+      const fps = 30;
+
+      // Calculate total duration based on all active tracks
+      const audioDuration = draft.replacedAudio
+        ? Math.max(0, (draft.replacedAudio.trimEnd || draft.replacedAudio.duration || 0) - (draft.replacedAudio.trimStart || 0))
+        : 0;
+      const mediaClipsMaxEnd = Math.max(0, ...(draft.mediaClips || []).map((c) => c.endTime || 0));
+      const totalDuration = Math.max(draft.duration || 0, audioDuration, mediaClipsMaxEnd, 1);
+      const totalFrames = Math.max(1, Math.ceil(totalDuration * fps));
+
+      onProgress(4, `أبعاد الفيديو: ${width}x${height} | الإطارات: ${totalFrames} إطار (${totalDuration.toFixed(1)} ثانية)`);
+
+      // 2. Preload Media Elements (Images & Videos with crossOrigin="anonymous")
+      onProgress(6, 'جاري تحميل وسائط الفيديو والصور مع تفعيل crossOrigin...');
+
+      let baseMedia: HTMLImageElement | HTMLVideoElement | null = null;
+      const baseSource = draft.videoSourceUrl || '/assets/aistudio/29515ac3-1b7a-4437-8444-84464b32b5fe_33174229.jpeg';
+      const isBaseVideo = draft.isCustomVideo || /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(baseSource);
+
+      if (isBaseVideo) {
+        baseMedia = await this.loadVideo(baseSource);
+      } else {
+        baseMedia = await this.loadImage(baseSource);
+      }
+
+      const clipElementsMap = new Map<string, HTMLImageElement | HTMLVideoElement>();
+      for (const clip of draft.mediaClips || []) {
+        if (!clipElementsMap.has(clip.url)) {
+          if (clip.type === 'video') {
+            const vid = await this.loadVideo(clip.url);
+            clipElementsMap.set(clip.url, vid);
+          } else {
+            const img = await this.loadImage(clip.url);
+            clipElementsMap.set(clip.url, img);
+          }
+        }
+      }
+
+      // Create offscreen rendering canvas
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
@@ -264,213 +482,206 @@ export class VideoExporter {
         throw new Error('فشل إنشاء سياق رسم Canvas ثنائي الأبعاد');
       }
 
-      // 2. Preload base image & clip assets
-      onProgress(5, 'جاري تحميل وسائط الفيديو والصور...');
-      const baseImageUrl = draft.videoSourceUrl || '/assets/aistudio/29515ac3-1b7a-4437-8444-84464b32b5fe_33174229.jpeg';
-      const baseImage = await this.loadImage(baseImageUrl);
+      // =========================================================================
+      // PHASE 1: RENDER FRAMES (0% to 70%)
+      // =========================================================================
+      onProgress(8, 'بدء رندرة إطارات الفيديو (Render Phase)...');
 
-      const clipImagesMap = new Map<string, HTMLImageElement>();
-      for (const clip of draft.mediaClips || []) {
-        if (!clipImagesMap.has(clip.url)) {
-          const img = await this.loadImage(clip.url);
-          clipImagesMap.set(clip.url, img);
+      for (let i = 0; i < totalFrames; i++) {
+        const t = i / fps;
+
+        // Synchronize and seek active videos at time t
+        if (baseMedia instanceof HTMLVideoElement) {
+          const baseTime = (draft.trimStart || 0) + t;
+          await this.seekVideo(baseMedia, baseTime);
+        }
+
+        for (const clip of draft.mediaClips || []) {
+          if (clip.type === 'video' && t >= clip.startTime && t <= clip.endTime) {
+            const clipVid = clipElementsMap.get(clip.url);
+            if (clipVid instanceof HTMLVideoElement) {
+              const clipLocalTime = (clip.trimStart || 0) + (t - clip.startTime);
+              await this.seekVideo(clipVid, clipLocalTime);
+            }
+          }
+        }
+
+        // Draw composite frame onto canvas
+        this.drawFrame(ctx, width, height, t, totalDuration, draft, baseMedia, clipElementsMap);
+
+        // Convert canvas frame to JPEG (0.92 quality)
+        const frameBlob: Blob = await new Promise((resolve, reject) => {
+          canvas.toBlob((b) => {
+            if (b) resolve(b);
+            else reject(new Error(`فشل إنشاء Blob للإطار رقم ${i + 1}`));
+          }, 'image/jpeg', 0.92);
+        });
+
+        const frameBuffer = await frameBlob.arrayBuffer();
+        const frameIndexStr = String(i + 1).padStart(5, '0');
+        const frameFilename = `frame_${frameIndexStr}.jpg`;
+
+        await FFmpegWasmService.writeFile(frameFilename, new Uint8Array(frameBuffer));
+        temporaryVirtualFiles.push(frameFilename);
+
+        // Mobile memory optimization: batch yield control every 5 frames
+        if (i % 5 === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+
+        // Update progress smoothly from 8% to 70%
+        const renderPct = 8 + Math.round(((i + 1) / totalFrames) * 62);
+        if (i % 3 === 0 || i === totalFrames - 1) {
+          onProgress(
+            renderPct,
+            `جاري رندرة الإطارات: ${i + 1} من ${totalFrames} (${renderPct}%) - الزمن: ${t.toFixed(1)}s`
+          );
         }
       }
 
-      // Draw initial frame at t = 0
-      this.drawFrame(ctx, width, height, 0, draft, baseImage, clipImagesMap);
+      onProgress(70, 'اكتملت رندرة جميع الإطارات بنجاح!');
 
-      // 3. Setup Video Stream (30 FPS)
-      const streamMethod = (canvas as any).captureStream || (canvas as any).mozCaptureStream;
-      if (!streamMethod) {
-        throw new Error('متصفحك لا يدعم خاصية captureStream لتسجيل الفيديو');
-      }
-      const videoStream: MediaStream = streamMethod.call(canvas, 30);
+      // =========================================================================
+      // PHASE 2: AUDIO PROCESSING & MIXING (70% to 80%)
+      // =========================================================================
+      onProgress(72, 'جاري تجهيز وقراءة ملفات الصوت...');
 
-      // 4. Setup Single AudioContext & Destination
-      let audioCtx: AudioContext | null = null;
-      let audioDest: MediaStreamAudioDestinationNode | null = null;
-      let audioSourceNode: AudioBufferSourceNode | null = null;
+      const audioTracksToMix: AudioTrackItem[] = [];
 
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioContextClass && draft.replacedAudio?.audioUrl) {
-        onProgress(10, 'جاري معالجة ومزامنة صوت التلاوة عبر AudioContext...');
-        audioCtx = new AudioContextClass();
-        if (audioCtx.state === 'suspended') {
-          await audioCtx.resume();
-        }
-        audioDest = audioCtx.createMediaStreamDestination();
-
+      // 1. Replaced audio track (e.g. Sheikh recitation or recorded voice)
+      if (draft.replacedAudio?.audioUrl) {
         try {
-          const audioResp = await fetch(draft.replacedAudio.audioUrl);
-          const audioBufferRaw = await audioResp.arrayBuffer();
-          const decodedAudio = await audioCtx.decodeAudioData(audioBufferRaw);
+          const resp = await fetch(draft.replacedAudio.audioUrl);
+          const buf = await resp.arrayBuffer();
+          const audioFilename = 'input_audio_replaced.dat';
+          await FFmpegWasmService.writeFile(audioFilename, new Uint8Array(buf));
+          temporaryVirtualFiles.push(audioFilename);
 
-          const gainNode = audioCtx.createGain();
-          gainNode.gain.value = Math.max(0, Math.min(1, draft.replacedAudioVolume ?? 1));
-          gainNode.connect(audioDest);
-
-          audioSourceNode = audioCtx.createBufferSource();
-          audioSourceNode.buffer = decodedAudio;
-          audioSourceNode.connect(gainNode);
-
-          // Add audio tracks to the video stream
-          audioDest.stream.getAudioTracks().forEach((track) => {
-            videoStream.addTrack(track);
+          audioTracksToMix.push({
+            filename: audioFilename,
+            url: draft.replacedAudio.audioUrl,
+            trimStart: draft.replacedAudio.trimStart || 0,
+            trimEnd: draft.replacedAudio.trimEnd,
+            startTime: draft.replacedAudioStartTime || 0,
+            volume: draft.replacedAudioVolume ?? 1
           });
-        } catch (audioErr: any) {
-          console.warn('Audio decoding warning:', audioErr);
+        } catch (audErr) {
+          console.warn('Could not fetch replaced audio track:', audErr);
         }
       }
 
-      // 5. Select prioritized codec
-      const mimeType = this.getPreferredMimeType();
+      // 2. Audio or video clips with sound
+      let clipAudioIndex = 0;
+      for (const clip of draft.mediaClips || []) {
+        if ((clip.type === 'audio' || clip.type === 'video') && !clip.isMuted && (clip.volume ?? 1) > 0) {
+          try {
+            const resp = await fetch(clip.url);
+            const buf = await resp.arrayBuffer();
+            const audioFilename = `input_audio_clip_${clipAudioIndex++}.dat`;
+            await FFmpegWasmService.writeFile(audioFilename, new Uint8Array(buf));
+            temporaryVirtualFiles.push(audioFilename);
 
-      // 6. Initialize MediaRecorder at 8Mbps
-      const recorder = new MediaRecorder(videoStream, {
-        mimeType,
-        videoBitsPerSecond: 8000000,
-      });
-
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          chunks.push(e.data);
+            audioTracksToMix.push({
+              filename: audioFilename,
+              url: clip.url,
+              trimStart: clip.trimStart || 0,
+              trimEnd: clip.trimEnd,
+              startTime: clip.startTime || 0,
+              volume: clip.volume ?? 1
+            });
+          } catch (clipAudErr) {
+            console.warn('Could not fetch clip audio track:', clipAudErr);
+          }
         }
-      };
+      }
 
-      // 7. Calculate real project duration (longest audio or clip, no fixed limit)
-      const audioDuration = draft.replacedAudio
-        ? Math.max(0, (draft.replacedAudio.trimEnd || draft.replacedAudio.duration || 0) - (draft.replacedAudio.trimStart || 0))
-        : 0;
-      const mediaClipsMax = Math.max(0, ...(draft.mediaClips || []).map((c) => c.endTime || 0));
-      const totalDuration = Math.max(draft.duration || 0, audioDuration, mediaClipsMax, 1);
-
-      // Start recording with 1000ms timeslices per requirement
-      recorder.start(1000);
-
-      const trimStart = draft.replacedAudio?.trimStart || 0;
-      if (audioSourceNode) {
+      // 3. Base video original audio (if not muted)
+      if (isBaseVideo && !draft.muteOriginalAudio && (draft.originalAudioVolume || 0) > 0 && draft.videoSourceUrl) {
         try {
-          audioSourceNode.start(0, trimStart, totalDuration);
+          const resp = await fetch(draft.videoSourceUrl);
+          const buf = await resp.arrayBuffer();
+          const audioFilename = 'input_audio_base.dat';
+          await FFmpegWasmService.writeFile(audioFilename, new Uint8Array(buf));
+          temporaryVirtualFiles.push(audioFilename);
+
+          audioTracksToMix.push({
+            filename: audioFilename,
+            url: draft.videoSourceUrl,
+            trimStart: draft.trimStart || 0,
+            trimEnd: draft.trimEnd,
+            startTime: 0,
+            volume: draft.originalAudioVolume
+          });
+        } catch (baseAudErr) {
+          console.warn('Could not fetch base video audio:', baseAudErr);
+        }
+      }
+
+      onProgress(75, 'جاري دمج المسارات الصوتية (atrim, adelay, volume, amix)...');
+      const mixedAudioFilename = await FFmpegWasmService.mixAudio(audioTracksToMix, totalDuration);
+      temporaryVirtualFiles.push(mixedAudioFilename);
+
+      onProgress(80, 'اكتمل دمج الصوت! بدء مرحلة الترميز والإنتاج (Encode Phase)...');
+
+      // =========================================================================
+      // PHASE 3: ENCODE FRAMES & AUDIO TO MP4 (80% to 100%)
+      // =========================================================================
+      onProgress(83, 'جاري تشفير الفيديو بـ libx264 و aac إلى ملف MP4...');
+
+      const mp4Blob = await FFmpegWasmService.encodeFramesToMp4(
+        mixedAudioFilename,
+        (encodePct) => {
+          const overallPct = 83 + Math.round(encodePct * 0.15);
+          onProgress(overallPct, `جاري تشفير MP4: ${overallPct}%...`);
+        }
+      );
+
+      // Validate output
+      if (!mp4Blob || mp4Blob.size < 1024) {
+        throw new Error('فشل تسجيل الفيديو: حجم ملف MP4 الناتج غير صالح (أقل من 1KB)');
+      }
+
+      onProgress(99, 'اكتمل إنتاج MP4 بنجاح! جاري بدء التنزيل التلقائي...');
+
+      // Automatic download of output.mp4
+      const cleanTitle = (draft.title || 'فيديو_المشروع')
+        .trim()
+        .replace(/[/\\?%*:|"<>]/g, '_')
+        .replace(/\s+/g, '_');
+      const filename = `${cleanTitle}.mp4`;
+
+      const downloadUrl = URL.createObjectURL(mp4Blob);
+      const downloadLink = document.createElement('a');
+      downloadLink.style.display = 'none';
+      downloadLink.href = downloadUrl;
+      downloadLink.download = filename;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+
+      setTimeout(() => {
+        if (document.body.contains(downloadLink)) {
+          document.body.removeChild(downloadLink);
+        }
+        URL.revokeObjectURL(downloadUrl);
+      }, 2000);
+
+      onSuccess(filename, mp4Blob.size, 'MP4');
+
+    } catch (err: any) {
+      console.error('VideoExporter error:', err);
+      const errName = err?.name || 'ExportError';
+      const errMsg = err?.message || 'حدث خطأ غير متوقع أثناء معالجة ورندرة الفيديو';
+      onError(`فشل تصدير الفيديو (${errName})`, errMsg);
+    } finally {
+      // Clean up temporary virtual files from ffmpeg FS
+      for (const f of temporaryVirtualFiles) {
+        try {
+          await FFmpegWasmService.deleteFile(f);
         } catch {}
       }
-
-      onProgress(15, `بدء تسجيل الفيديو بالسرعة الطبيعية (0.0s إلى ${totalDuration.toFixed(1)}s)...`);
-
-      // 8. Playback loop synchronized with requestAnimationFrame
-      const startTime = performance.now();
-      const totalDurationMs = totalDuration * 1000;
-
-      await new Promise<void>((resolve, reject) => {
-        let isStopped = false;
-
-        const renderStep = () => {
-          if (isStopped) return;
-
-          const elapsedMs = performance.now() - startTime;
-          const currentSec = Math.min(totalDuration, elapsedMs / 1000);
-
-          // Draw frame with drawImage
-          VideoExporter.drawFrame(ctx, width, height, currentSec, draft, baseImage, clipImagesMap);
-
-          const progressPercent = Math.min(85, Math.round(15 + (elapsedMs / totalDurationMs) * 70));
-          onProgress(
-            progressPercent,
-            `تسجيل الإطارات: ${currentSec.toFixed(1)}s / ${totalDuration.toFixed(1)}s (${progressPercent}%)`
-          );
-
-          if (elapsedMs >= totalDurationMs) {
-            isStopped = true;
-            try {
-              audioSourceNode?.stop();
-              audioCtx?.close().catch(() => {});
-            } catch {}
-
-            if (recorder.state !== 'inactive') {
-              recorder.stop();
-            }
-            resolve();
-          } else {
-            requestAnimationFrame(renderStep);
-          }
-        };
-
-        recorder.onerror = (recErr: any) => {
-          isStopped = true;
-          reject(recErr);
-        };
-
-        requestAnimationFrame(renderStep);
-      });
-
-      // 9. On stop: Validate recorded chunks
-      await new Promise<void>((resolve, reject) => {
-        recorder.onstop = async () => {
-          try {
-            onProgress(88, 'جاري فحص حجم البيانات المسجلة وتجهيز ملف الفيديو...');
-
-            const rawBlob = new Blob(chunks, { type: mimeType });
-
-            // Fail if chunks is empty or blob size is less than 1KB
-            if (chunks.length === 0 || rawBlob.size < 1024) {
-              const err = new Error('فشل التسجيل: حجم ملف الفيديو الناتج أقل من 1KB أو لم يتم التقاط بيانات كافية');
-              err.name = 'ExportValidationError';
-              throw err;
-            }
-
-            let finalBlob = rawBlob;
-            let finalFormat = mimeType.includes('mp4') ? 'mp4' : 'webm';
-
-            // 10. Step 4: Convert WebM to MP4 via ffmpeg.wasm if recorded in WebM
-            if (finalFormat === 'webm') {
-              onProgress(90, 'جاري تحويل الفيديو إلى صيغة MP4 العالمية عبر ffmpeg.wasm...');
-              try {
-                finalBlob = await FFmpegWasmService.convertWebmToMp4(rawBlob, (wasmPct) => {
-                  onProgress(90 + Math.round(wasmPct * 0.08), `تحويل MP4: ${wasmPct}%`);
-                });
-                finalFormat = 'mp4';
-              } catch (wasmErr: any) {
-                console.warn('ffmpeg.wasm conversion fallback to WebM:', wasmErr);
-                onProgress(96, 'اكتمل التسجيل بصيغة WebM فائقة الجودة...');
-                finalBlob = rawBlob;
-                finalFormat = 'webm';
-              }
-            }
-
-            // 11. Trigger automatic file download
-            onProgress(98, 'بدء تنزيل ملف الفيديو إلى جهازك...');
-            const cleanTitle = draft.title ? draft.title.replace(/\s+/g, '_') : 'فيديو_المشروع';
-            const filename = `${cleanTitle}.${finalFormat}`;
-            const downloadUrl = URL.createObjectURL(finalBlob);
-
-            const downloadLink = document.createElement('a');
-            downloadLink.style.display = 'none';
-            downloadLink.href = downloadUrl;
-            downloadLink.download = filename;
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-
-            setTimeout(() => {
-              if (document.body.contains(downloadLink)) {
-                document.body.removeChild(downloadLink);
-              }
-            }, 600);
-
-            onProgress(100, 'اكتمل إنتاج وتنزيل الفيديو بنجاح!');
-            onSuccess(filename, finalBlob.size, finalFormat);
-            resolve();
-          } catch (err: any) {
-            reject(err);
-          }
-        };
-      });
-
-    } catch (error: any) {
-      console.error('VideoExporter failure:', error);
-      const errorTitle = error.name || 'ExportError';
-      const errorDetails = error.message || 'حدث خطأ غير متوقع أثناء معالجة وتصدير الفيديو';
-      onError(errorTitle, errorDetails);
+      try {
+        await FFmpegWasmService.deleteFile('output.mp4');
+      } catch {}
     }
   }
 }

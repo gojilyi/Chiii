@@ -943,7 +943,7 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
               </div>
               
               <div>
-                <h3 className="text-lg font-bold text-white">جاري تصدير الفيديو الحقيقي (MP4 / WebM)</h3>
+                <h3 className="text-lg font-bold text-white">جاري رندرة وتشفير الفيديو (Kinemaster Render & Encode)</h3>
                 <p className="text-xs text-[#A0A0A0] mt-1">{exportStage}</p>
               </div>
 
@@ -957,11 +957,11 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
               
               <div className="flex justify-between items-center text-xs font-mono text-[#F5B800]">
                 <span>{exportProgress}%</span>
-                <span>دفق فوري 30 FPS</span>
+                <span>30 FPS | H.264 + AAC</span>
               </div>
 
               <p className="text-[11px] text-[#888888]">
-                يتم دمج الإطارات والصوت مباشرة عبر MediaRecorder. سيبدأ التنزيل تلقائيًا فور اكتمال التصدير.
+                تتم رندرة الإطارات بدقة ثم دمج الصوت عبر ffmpeg.wasm وتشفير ملف MP4 النهائي. سيبدأ التنزيل تلقائيًا.
               </p>
             </div>
           </div>

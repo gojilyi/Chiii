@@ -47,6 +47,8 @@ import {
 } from '../../constants/autoLectureDefaults';
 import { generateASS, generateSRT } from '../../constants/calligraphyDefaults';
 import { audioEngine } from '../../services/audioEngine';
+import { VideoExporter } from '../../services/videoExporter';
+import { ProjectDraft, AspectRatioType } from '../../types';
 
 interface AutoLectureMakerScreenProps {
   onOpenInEditor: (bgUrl: string, title: string, words: any[], audioUrl?: string) => void;
@@ -615,142 +617,69 @@ export const AutoLectureMakerScreen: React.FC<AutoLectureMakerScreenProps> = ({
   -c:v libx264 -preset ultrafast -tune stillimage \\
   -c:a aac -b:a 192k -shortest -pix_fmt yuv420p output_auto_lesson.mp4`;
 
-  // Real in-browser video generator (MediaRecorder stream to video)
+  // Video generator using unified VideoExporter (Render & Encode via ffmpeg.wasm)
   const exportVideo = async () => {
     setIsExporting(true);
-    setExportProgress(10);
+    setExportProgress(1);
     setIsExportDone(false);
     setExportedVideoUrl(null);
 
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      setIsExporting(false);
-      return;
-    }
+    const lectureDraft: ProjectDraft = {
+      id: 'auto_lecture_' + Date.now(),
+      title: `درس_الشيخ_العيد_${selectedLesson.title.replace(/\s+/g, '_')}`,
+      aspectRatio: (aspectRatio as AspectRatioType) || '9:16',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      duration: customDuration,
+      videoSourceUrl: selectedBg.assetPath,
+      videoSourceName: selectedBg.name,
+      muteOriginalAudio: false,
+      originalAudioVolume: 1,
+      replacedAudio: customAudioUrl ? {
+        id: 'sheikh_voice',
+        title: selectedLesson.title,
+        artist: 'الشيخ الدكتور محمد بن علي العيد',
+        category: 'sheikh_recording',
+        duration: customDuration,
+        audioUrl: customAudioUrl,
+        trimStart: 0,
+        trimEnd: customDuration,
+      } : null,
+      replacedAudioVolume: 1,
+      replacedAudioStartTime: 0,
+      textOverlays: [],
+      imageOverlays: [],
+      effects: [],
+      thumbnailUrl: selectedBg.assetPath,
+      calligraphyStory: {
+        enabled: true,
+        fontStyle: (fontFamily as any) || 'Aref Ruqaa',
+        mode: 'word_by_word',
+        highlightColor: highlightColor,
+        defaultColor: '#FFFFFF',
+        fontSize: fontSize,
+        parchmentBackgroundUrl: selectedBg.assetPath,
+        words: selectedLesson.words || [],
+        audioSourceTitle: selectedLesson.title
+      }
+    };
 
     try {
-      setExportProgress(20);
-
-      // 1. Setup AudioContext and Stream Destination for audio mixing
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const audioCtx = new AudioCtx();
-      if (audioCtx.state === 'suspended') {
-        await audioCtx.resume().catch(() => {});
-      }
-      const dest = audioCtx.createMediaStreamDestination();
-      let srcNode: AudioBufferSourceNode | null = null;
-
-      if (customAudioUrl) {
-        try {
-          const resp = await fetch(customAudioUrl);
-          const buf = await resp.arrayBuffer();
-          const audioBuffer = await audioCtx.decodeAudioData(buf);
-          srcNode = audioCtx.createBufferSource();
-          srcNode.buffer = audioBuffer;
-          srcNode.connect(dest);
-        } catch (audioErr) {
-          console.warn('Audio decode notice:', audioErr);
+      await VideoExporter.exportVideo(lectureDraft, {
+        onProgress: (pct, _stage) => {
+          setExportProgress(pct);
+        },
+        onSuccess: (filename, _sizeBytes, _fmt) => {
+          setExportProgress(100);
+          setIsExporting(false);
+          setIsExportDone(true);
+        },
+        onError: (errTitle, errDetails) => {
+          console.error(errTitle, errDetails);
+          setIsExporting(false);
+          setIsExportDone(false);
         }
-      }
-
-      setExportProgress(30);
-
-      // 2. Capture canvas stream at 30 fps
-      const streamMethod = (canvas as any).captureStream || (canvas as any).mozCaptureStream;
-      if (!streamMethod) {
-        throw new Error('متصفحك لا يدعم خاصية captureStream');
-      }
-      const stream: MediaStream = streamMethod.call(canvas, 30);
-
-      const audioTracks = dest.stream.getAudioTracks();
-      const combinedTracks = [
-        ...stream.getVideoTracks(),
-        ...(audioTracks.length > 0 ? audioTracks : []),
-      ];
-      const combinedStream = new MediaStream(combinedTracks);
-
-      // 3. Negotiate best container format: MP4 first, then WebM VP9, then standard WebM
-      let chosenMime = 'video/webm';
-      let extension = 'webm';
-      if (typeof MediaRecorder !== 'undefined') {
-        if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')) {
-          chosenMime = 'video/mp4;codecs=avc1,mp4a.40.2';
-          extension = 'mp4';
-        } else if (MediaRecorder.isTypeSupported('video/mp4;codecs=h264,aac')) {
-          chosenMime = 'video/mp4;codecs=h264,aac';
-          extension = 'mp4';
-        } else if (MediaRecorder.isTypeSupported('video/mp4')) {
-          chosenMime = 'video/mp4';
-          extension = 'mp4';
-        } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
-          chosenMime = 'video/webm;codecs=vp9,opus';
-          extension = 'webm';
-        } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
-          chosenMime = 'video/webm;codecs=vp9';
-          extension = 'webm';
-        } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
-          chosenMime = 'video/webm;codecs=vp8,opus';
-          extension = 'webm';
-        }
-      }
-
-      let recorder: MediaRecorder;
-      try {
-        recorder = new MediaRecorder(combinedStream, { mimeType: chosenMime, videoBitsPerSecond: 5000000 });
-      } catch {
-        recorder = new MediaRecorder(combinedStream);
-      }
-
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunks.push(e.data);
-      };
-
-      const outFilename = `درس_الشيخ_العيد_${selectedLesson.title.replace(/\s+/g, '_')}.${extension}`;
-
-      recorder.onstop = () => {
-        const finalMime = recorder.mimeType || chosenMime;
-        const videoBlob = new Blob(chunks, { type: finalMime });
-        const videoUrl = URL.createObjectURL(videoBlob);
-        setExportedVideoUrl(videoUrl);
-        setExportProgress(100);
-        setIsExporting(false);
-        setIsExportDone(true);
-        audioCtx.close().catch(() => {});
-
-        // Automatic download
-        try {
-          const a = document.createElement('a');
-          a.style.display = 'none';
-          a.href = videoUrl;
-          a.download = outFilename;
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => document.body.removeChild(a), 300);
-        } catch {}
-      };
-
-      recorder.start(100);
-      if (srcNode) {
-        try {
-          srcNode.start(0, 0, customDuration);
-        } catch {}
-      }
-
-      const totalMs = customDuration * 1000;
-      const startMs = Date.now();
-      const timer = setInterval(() => {
-        const elapsed = Date.now() - startMs;
-        const pct = Math.min(95, Math.round(30 + (elapsed / totalMs) * 65));
-        setExportProgress(pct);
-        if (elapsed >= totalMs) {
-          clearInterval(timer);
-          try {
-            srcNode?.stop();
-          } catch {}
-          recorder.stop();
-        }
-      }, 100);
+      });
     } catch (err: any) {
       console.error('Export failed:', err);
       setIsExporting(false);
