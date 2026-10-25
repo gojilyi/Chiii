@@ -59,6 +59,7 @@ import { EditorWorkspaceTabs } from './editor/EditorWorkspaceTabs';
 import { StorageService } from '../services/storageService';
 import { audioEngine, extractMediaDuration } from '../services/audioEngine';
 import { DEFAULT_PARTICLE_OVERLAYS, DEFAULT_BACKGROUND_ADJUSTMENTS } from '../constants/defaults';
+import { VideoExporter } from '../services/videoExporter';
 
 interface VideoEditorScreenProps {
   draft: ProjectDraft;
@@ -523,165 +524,42 @@ export const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({
     });
   };
 
-  // Real-time Video Exporter: MediaRecorder + canvas.captureStream(30) + Web Audio + Automatic .mp4 / .webm download
+  // Real-time Video Exporter: MediaRecorder + canvas.captureStream(30) + Web Audio + ffmpeg.wasm MP4 + Automatic download
   const exportVideo = async () => {
     setIsExporting(true);
     setExportProgress(0);
-    setExportStage('جاري تهيئة دفق الفيديو (30 FPS)...');
+    setExportStage('جاري تهيئة تصدير الفيديو...');
     setExportSuccessMessage(null);
     setExportErrorMessage(null);
 
     try {
-      let canvas = liveCanvasRef.current;
-      if (!canvas) {
-        canvas = document.querySelector('canvas');
-      }
-      if (!canvas) {
-        throw new Error('تعذر العثور على لوحة الرسم (Canvas) لتسجيل الفيديو');
-      }
-
-      const streamMethod = (canvas as any).captureStream || (canvas as any).mozCaptureStream;
-      if (!streamMethod) {
-        throw new Error('متصفحك لا يدعم خاصية captureStream لتسجيل الفيديو');
-      }
-      const stream: MediaStream = streamMethod.call(canvas, 30);
-
-      // Audio integration via AudioContext and MediaStreamDestination
-      let audioCtx: AudioContext | null = null;
-      let audioDest: MediaStreamAudioDestinationNode | null = null;
-      let audioSourceNode: AudioBufferSourceNode | null = null;
-
-      if (draft.replacedAudio?.audioUrl) {
-        setExportStage('جاري مزامنة الصوت ودمجه مع الفيديو...');
-        const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtxClass) {
-          audioCtx = new AudioCtxClass();
-          if (audioCtx.state === 'suspended') {
-            await audioCtx.resume().catch(() => {});
-          }
-          audioDest = audioCtx.createMediaStreamDestination();
-
-          try {
-            const resp = await fetch(draft.replacedAudio.audioUrl);
-            const buf = await resp.arrayBuffer();
-            const decoded = await audioCtx.decodeAudioData(buf);
-
-            const gain = audioCtx.createGain();
-            gain.gain.value = Math.max(0, Math.min(1, draft.replacedAudioVolume ?? 1));
-            gain.connect(audioDest);
-
-            audioSourceNode = audioCtx.createBufferSource();
-            audioSourceNode.buffer = decoded;
-            audioSourceNode.connect(gain);
-
-            audioDest.stream.getAudioTracks().forEach((track) => {
-              stream.addTrack(track);
-            });
-          } catch (audioErr) {
-            console.warn('Audio decoding skipped or failed:', audioErr);
-          }
+      await VideoExporter.exportVideo(draft, {
+        onProgress: (percent, stage) => {
+          setExportProgress(percent);
+          setExportStage(stage);
+        },
+        onSuccess: (filename, sizeBytes, format) => {
+          setIsExporting(false);
+          const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(2);
+          setExportSuccessMessage(`✅ تم تصدير وتنزيل الفيديو بنجاح: ${filename} (${sizeMB} MB بصيغة ${format})!`);
+          setTimeout(() => {
+            setExportSuccessMessage(null);
+          }, 8000);
+        },
+        onError: (errTitle, errDetails) => {
+          setIsExporting(false);
+          setExportErrorMessage(`${errTitle}: ${errDetails}`);
         }
-      }
-
-      // Priority container & codec selection per user requirement
-      const types = [
-        'video/mp4;codecs=avc1',
-        'video/mp4',
-        'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=vp8,opus',
-        'video/webm'
-      ];
-      const mimeType = types.find((t) => MediaRecorder.isTypeSupported(t)) || 'video/webm';
-
-      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
-      const chunks: Blob[] = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          chunks.push(e.data);
-        }
-      };
-
-      // Project real duration (longest audio or clip, no fixed limit)
-      const audioDur = draft.replacedAudio
-        ? Math.max(0, (draft.replacedAudio.trimEnd || draft.replacedAudio.duration || 0) - (draft.replacedAudio.trimStart || 0))
-        : 0;
-      const mediaClipsMax = Math.max(0, ...(draft.mediaClips || []).map((c) => c.endTime || 0));
-      const totalDur = Math.max(draft.duration || 0, audioDur, mediaClipsMax, 1);
-
-      // Seek to 0 and start playback synchronized at 1x normal speed
-      handleSeek(0);
-      setIsPlaying(true);
-      recorder.start(100);
-
-      const trimStartSec = draft.replacedAudio?.trimStart || 0;
-      if (audioSourceNode) {
-        try {
-          audioSourceNode.start(0, trimStartSec, totalDur);
-        } catch {}
-      }
-
-      setExportStage('جاري تسجيل الفيديو بالسرعة الطبيعية من البداية للنهاية...');
-
-      const startTime = Date.now();
-      const totalMs = totalDur * 1000;
-
-      const progressInterval = setInterval(() => {
-        const elapsed = Date.now() - startTime;
-        const pct = Math.min(99, Math.round((elapsed / totalMs) * 100));
-        setExportProgress(pct);
-        setExportStage(`جاري تسجيل إطارات الفيديو: ${pct}% (${(elapsed / 1000).toFixed(1)}s من ${totalDur.toFixed(1)}s)`);
-
-        if (elapsed >= totalMs) {
-          clearInterval(progressInterval);
-          try {
-            audioSourceNode?.stop();
-            audioCtx?.close().catch(() => {});
-          } catch {}
-          setIsPlaying(false);
-          if (recorder.state !== 'inactive') {
-            recorder.stop();
-          }
-        }
-      }, 100);
-
-      recorder.onstop = () => {
-        setExportProgress(100);
-        setExportStage('اكتمل التسجيل! جاري حزم ملف الفيديو وبدء التنزيل...');
-
-        const finalMime = recorder.mimeType || mimeType;
-        const blob = new Blob(chunks, { type: finalMime });
-        const ext = finalMime.includes('mp4') ? 'mp4' : 'webm';
-        const cleanName = draft.title ? draft.title.replace(/\s+/g, '_') : 'فيديو_المشروع';
-        const filename = `${cleanName}.${ext}`;
-        const blobUrl = URL.createObjectURL(blob);
-
-        const downloadLink = document.createElement('a');
-        downloadLink.style.display = 'none';
-        downloadLink.href = blobUrl;
-        downloadLink.download = filename;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-
-        setTimeout(() => {
-          if (document.body.contains(downloadLink)) {
-            document.body.removeChild(downloadLink);
-          }
-        }, 500);
-
-        setIsExporting(false);
-        setExportSuccessMessage(`✅ تم تصدير وتنزيل الفيديو بنجاح: ${filename} (${(blob.size / (1024 * 1024)).toFixed(2)} MB)!`);
-        setTimeout(() => {
-          setExportSuccessMessage(null);
-        }, 6000);
-      };
-
+      });
     } catch (err: any) {
       console.error('exportVideo error:', err);
       setIsExporting(false);
-      setExportErrorMessage(`فشل تصدير الفيديو: ${err?.message || 'تعذر استخراج الفيديو'}`);
+      const errName = err?.name || 'Error';
+      const errMsg = err?.message || 'حدث خطأ غير متوقع أثناء معالجة وتصدير الفيديو';
+      setExportErrorMessage(`فشل تصدير الفيديو (${errName}): ${errMsg}`);
     }
   };
+
 
   return (
     <div className="min-h-screen bg-[#1a1a1a] text-white flex flex-col font-sans select-none">
