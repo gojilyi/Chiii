@@ -667,11 +667,16 @@ export class VideoExporter {
 
       onSuccess(filename, mp4Blob.size, 'MP4');
 
-    } catch (err: any) {
-      console.error('VideoExporter error:', err);
-      const errName = err?.name || 'ExportError';
-      const errMsg = err?.message || 'حدث خطأ غير متوقع أثناء معالجة ورندرة الفيديو';
-      onError(`فشل تصدير الفيديو (${errName})`, errMsg);
+    } catch (wasmErr: any) {
+      console.warn('ffmpeg.wasm export failed or encountered error, falling back to Native Server FFmpeg Engine:', wasmErr);
+      try {
+        await this.exportViaServerNative(draft, callbacks);
+      } catch (serverErr: any) {
+        console.error('VideoExporter fallback error:', serverErr);
+        const errName = serverErr?.name || wasmErr?.name || 'ExportError';
+        const errMsg = serverErr?.message || wasmErr?.message || 'حدث خطأ أثناء معالجة ورندرة الفيديو';
+        onError(`فشل تصدير الفيديو (${errName})`, errMsg);
+      }
     } finally {
       // Clean up temporary virtual files from ffmpeg FS
       for (const f of temporaryVirtualFiles) {
@@ -684,4 +689,154 @@ export class VideoExporter {
       } catch {}
     }
   }
+
+  /**
+   * High-Performance Server Native FFmpeg Exporter
+   * Renders the complete composite canvas with all typography, calligraphy, arch frame, and banner,
+   * encodes using server native /usr/bin/ffmpeg, and triggers instant download.
+   */
+  static async exportViaServerNative(
+    draft: ProjectDraft,
+    callbacks: VideoExportCallbacks
+  ): Promise<void> {
+    const { onProgress, onSuccess, onError } = callbacks;
+
+    try {
+      onProgress(15, 'جاري تهيئة الرندرة عبر محرك FFmpeg فائق السرعة...');
+
+      // 1. Calculate dimensions
+      let width = 720;
+      let height = 1280;
+      if (draft.aspectRatio === '16:9') {
+        width = 1280;
+        height = 720;
+      } else if (draft.aspectRatio === '1:1') {
+        width = 720;
+        height = 720;
+      }
+      if (width % 2 !== 0) width += 1;
+      if (height % 2 !== 0) height += 1;
+
+      // 2. Preload media elements
+      onProgress(25, 'جاري رندرة لوحة الاستوديو الشاملة (صوت + صورة + خط قرآني + مؤثرات)...');
+      const baseSource = draft.videoSourceUrl || '/assets/aistudio/29515ac3-1b7a-4437-8444-84464b32b5fe_33174229.jpeg';
+      const baseMedia = await this.loadImage(baseSource);
+
+      const clipElementsMap = new Map<string, HTMLImageElement | HTMLVideoElement>();
+      for (const clip of draft.mediaClips || []) {
+        if (!clipElementsMap.has(clip.url)) {
+          if (clip.type === 'video') {
+            const vid = await this.loadVideo(clip.url);
+            clipElementsMap.set(clip.url, vid);
+          } else {
+            const img = await this.loadImage(clip.url);
+            clipElementsMap.set(clip.url, img);
+          }
+        }
+      }
+
+      // 3. Render composite frame onto canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      if (!ctx) {
+        throw new Error('فشل إنشاء سياق رسم Canvas');
+      }
+
+      const audioDuration = draft.replacedAudio
+        ? Math.max(0, (draft.replacedAudio.trimEnd || draft.replacedAudio.duration || 0) - (draft.replacedAudio.trimStart || 0))
+        : 0;
+      const mediaClipsMaxEnd = Math.max(0, ...(draft.mediaClips || []).map((c) => c.endTime || 0));
+      const totalDuration = Math.max(draft.duration || 0, audioDuration, mediaClipsMaxEnd, 1);
+
+      this.drawFrame(ctx, width, height, 0, totalDuration, draft, baseMedia, clipElementsMap);
+
+      let compositeImage: string;
+      try {
+        compositeImage = canvas.toDataURL('image/jpeg', 0.95);
+      } catch {
+        compositeImage = baseSource;
+      }
+
+      // 4. Resolve audio data (handle blob: URLs from voice recordings)
+      onProgress(50, 'جاري معالجة مسار التلاوة وصوت الشيخ...');
+      let resolvedAudio: string | undefined = draft.replacedAudio?.audioUrl;
+      if (resolvedAudio && resolvedAudio.startsWith('blob:')) {
+        try {
+          const resp = await fetch(resolvedAudio);
+          const b = await resp.blob();
+          resolvedAudio = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => resolve('');
+            reader.readAsDataURL(b);
+          });
+        } catch (e) {
+          console.warn('Failed to convert blob audio to base64:', e);
+        }
+      }
+
+      // 5. Send to Server FFmpeg Engine
+      onProgress(70, 'جاري تشفير الفيديو بـ FFmpeg (H.264 + AAC 30 FPS)...');
+
+      const cleanTitle = (draft.title || 'فيديو_المشروع')
+        .trim()
+        .replace(/[/\\?%*:|"<>]/g, '_')
+        .replace(/\s+/g, '_');
+      const filename = `${cleanTitle}.mp4`;
+
+      const response = await fetch('/api/render-ffmpeg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: compositeImage,
+          audio: resolvedAudio,
+          audioTrimStart: draft.replacedAudio?.trimStart || 0,
+          audioTrimEnd: draft.replacedAudio?.trimEnd,
+          duration: totalDuration,
+          width,
+          height,
+          fps: 30,
+          filename
+        })
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => null);
+        throw new Error(errJson?.error || `فشل خادم FFmpeg في رندرة الفيديو (رمز: ${response.status})`);
+      }
+
+      onProgress(90, 'اكتمل إنتاج الفيديو بنجاح! جاري استلام الملف وبدء التنزيل...');
+      const mp4Blob = await response.blob();
+
+      if (!mp4Blob || mp4Blob.size < 1024) {
+        throw new Error('حجم ملف الفيديو الناتج غير صالح (أقل من 1KB)');
+      }
+
+      onProgress(100, 'تم استخراج وتنزيل الفيديو بنجاح!');
+
+      // Trigger download
+      const downloadUrl = URL.createObjectURL(mp4Blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = downloadUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+
+      setTimeout(() => {
+        if (document.body.contains(a)) document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
+      }, 2000);
+
+      onSuccess(filename, mp4Blob.size, 'MP4');
+    } catch (err: any) {
+      console.error('Server export error:', err);
+      const errName = err?.name || 'ExportError';
+      const errMsg = err?.message || 'تعذر استخراج الفيديو';
+      onError(`فشل تصدير الفيديو (${errName})`, errMsg);
+    }
+  }
 }
+

@@ -49,18 +49,25 @@ export class FFmpegWasmService {
         });
       }
 
-      // 1. Try local server endpoint first
-      try {
-        const coreURL = await toBlobURL('/ffmpeg/ffmpeg-core.js', 'text/javascript');
-        const wasmURL = await toBlobURL('/ffmpeg/ffmpeg-core.wasm', 'application/wasm');
-        await ffmpeg.load({ coreURL, wasmURL });
-      } catch (localErr) {
-        console.warn('Local ffmpeg core load failed, attempting CDN fallback:', localErr);
-        const cdnBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-        const coreURL = await toBlobURL(`${cdnBase}/ffmpeg-core.js`, 'text/javascript');
-        const wasmURL = await toBlobURL(`${cdnBase}/ffmpeg-core.wasm`, 'application/wasm');
-        await ffmpeg.load({ coreURL, wasmURL });
-      }
+      const loadPromise = (async () => {
+        try {
+          const coreURL = await toBlobURL('/ffmpeg/ffmpeg-core.js', 'text/javascript');
+          const wasmURL = await toBlobURL('/ffmpeg/ffmpeg-core.wasm', 'application/wasm');
+          await ffmpeg.load({ coreURL, wasmURL });
+        } catch (localErr) {
+          console.warn('Local ffmpeg core load failed, attempting CDN fallback:', localErr);
+          const cdnBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+          const coreURL = await toBlobURL(`${cdnBase}/ffmpeg-core.js`, 'text/javascript');
+          const wasmURL = await toBlobURL(`${cdnBase}/ffmpeg-core.wasm`, 'application/wasm');
+          await ffmpeg.load({ coreURL, wasmURL });
+        }
+      })();
+
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('انتهت مهلة تحميل ffmpeg.wasm في المتصفح')), 10000);
+      });
+
+      await Promise.race([loadPromise, timeoutPromise]);
 
       this.ffmpegInstance = ffmpeg;
       this.isLoaded = true;
@@ -68,6 +75,7 @@ export class FFmpegWasmService {
     } finally {
       this.isLoading = false;
     }
+
   }
 
   /**

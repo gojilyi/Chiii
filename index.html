@@ -1,6 +1,39 @@
 <!doctype html>
 <html lang="ar" dir="rtl">
   <head>
+    <script>
+      // Suppress Vite dev WebSocket reconnection noise in proxy / iframe environments
+      // per environment constraints: "HMR: Disabled. Ignore WebSocket errors."
+      (function () {
+        const _origError = console.error;
+        console.error = function (...args) {
+          for (let i = 0; i < args.length; i++) {
+            const a = args[i];
+            if (
+              (typeof a === 'string' && (a.includes('[vite]') || a.includes('WebSocket closed without opened') || a.includes('failed to connect to websocket'))) ||
+              (a instanceof Error && (a.message.includes('WebSocket') || a.stack?.includes('@vite/client')))
+            ) {
+              return;
+            }
+          }
+          return _origError.apply(console, args);
+        };
+
+        window.addEventListener('error', function (e) {
+          if (e && (e.message?.includes('WebSocket') || e.filename?.includes('@vite/client'))) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (e) {
+          if (e && String(e.reason).includes('WebSocket')) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+          }
+        }, true);
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>الشيخ العيد - استوديو مونتاج الفيديو الهادف</title>
@@ -20,21 +53,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400&family=Aref+Ruqaa:wght@400;700&family=Cairo:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script>
-      // Suppress Vite dev WebSocket reconnection noise in proxy / iframe environments
-      window.addEventListener('error', function (e) {
-        if (e && (e.message?.includes('WebSocket') || e.filename?.includes('@vite/client'))) {
-          e.stopImmediatePropagation();
-          e.preventDefault();
-        }
-      });
-      window.addEventListener('unhandledrejection', function (e) {
-        if (e && String(e.reason).includes('WebSocket')) {
-          e.stopImmediatePropagation();
-          e.preventDefault();
-        }
-      });
-    </script>
   </head>
 
   <body class="bg-[#121316] text-[#E3E2E6] antialiased selection:bg-[#006C4C] selection:text-white min-h-screen">

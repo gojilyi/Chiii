@@ -50,6 +50,7 @@ async function startServer() {
         audio,           // base64 data url or relative file path
         audioTrimStart,  // in seconds
         audioTrimEnd,    // in seconds
+        duration,        // in seconds
         width = 720,
         height = 1280,
         fps = 30,
@@ -61,10 +62,14 @@ async function startServer() {
       }
 
       // 1. Resolve & write input image
-      if (typeof image === 'string' && image.startsWith('data:image/')) {
-        const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+      if (typeof image === 'string' && (image.startsWith('data:image/') || image.startsWith('data:application/'))) {
+        const base64Data = image.replace(/^data:[^;]+;base64,/, '');
         await fs.promises.writeFile(tempImage, Buffer.from(base64Data, 'base64'));
-      } else if (typeof image === 'string' && (image.startsWith('/') || image.startsWith('http'))) {
+      } else if (typeof image === 'string' && (image.startsWith('http://') || image.startsWith('https://'))) {
+        const resp = await fetch(image);
+        const buf = await resp.arrayBuffer();
+        await fs.promises.writeFile(tempImage, Buffer.from(buf));
+      } else if (typeof image === 'string' && image.startsWith('/')) {
         const cleanPath = image.replace(/^\//, '');
         const localCandidates = [
           path.resolve(__dirname, 'public', cleanPath),
@@ -81,7 +86,7 @@ async function startServer() {
         }
         if (!found) {
           // Fallback to any default local image asset
-          const defaultAsset = path.resolve(__dirname, 'public/assets/aistudio/IMG_20261022_114507_a14e319a.jpg');
+          const defaultAsset = path.resolve(__dirname, 'public/assets/aistudio/29515ac3-1b7a-4437-8444-84464b32b5fe_33174229.jpeg');
           if (fs.existsSync(defaultAsset)) {
             await fs.promises.copyFile(defaultAsset, tempImage);
           } else {
@@ -94,11 +99,20 @@ async function startServer() {
 
       // 2. Resolve & write input audio
       let hasRealAudio = false;
-      if (typeof audio === 'string' && audio.startsWith('data:audio/')) {
-        const base64Data = audio.replace(/^data:audio\/\w+;base64,/, '');
+      if (typeof audio === 'string' && (audio.startsWith('data:audio/') || audio.startsWith('data:application/'))) {
+        const base64Data = audio.replace(/^data:[^;]+;base64,/, '');
         await fs.promises.writeFile(tempAudio, Buffer.from(base64Data, 'base64'));
         hasRealAudio = true;
-      } else if (typeof audio === 'string' && (audio.startsWith('/') || audio.startsWith('http'))) {
+      } else if (typeof audio === 'string' && (audio.startsWith('http://') || audio.startsWith('https://'))) {
+        try {
+          const resp = await fetch(audio);
+          const buf = await resp.arrayBuffer();
+          await fs.promises.writeFile(tempAudio, Buffer.from(buf));
+          hasRealAudio = true;
+        } catch (audFetchErr) {
+          console.warn('[render-ffmpeg] Failed to fetch remote audio:', audFetchErr);
+        }
+      } else if (typeof audio === 'string' && audio.startsWith('/')) {
         const cleanPath = audio.replace(/^\//, '');
         const localCandidates = [
           path.resolve(__dirname, 'public', cleanPath),
@@ -131,9 +145,11 @@ async function startServer() {
         }
         args.push('-i', tempAudio);
       } else {
-        // Fallback: 5 seconds of silence if no audio is attached (never synthesizes fake sounds!)
-        args.push('-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '5');
+        // Fallback: silence matching duration if no audio is attached
+        const targetDur = typeof duration === 'number' && duration > 0 ? duration : 5;
+        args.push('-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', String(targetDur));
       }
+
 
       // Filter graph: scale & crop to target dimensions + 30fps
       const filterGraph = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},fps=${fps}`;
